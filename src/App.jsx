@@ -1255,57 +1255,107 @@ function CeilingFan({ x, z }) {
   )
 }
 
-/**
- * Power outlet strip near the base, in the middle of Room 301's BACK wall,
- * plugged into a wall outlet. One cord runs up the back wall to the Mini PC
- * shelf; another runs along the base and up the door wall to the rear-door shelf.
- */
-function PowerExtension({ showLabels }) {
+/* Two wall outlets side by side in the middle of the back wall, below the wall fan */
+const OUTLET_Y = 0.42
+const OUTLET_FAN_Z = BACK_OUTLET_Z - 0.11 // wall fan plugs in here
+const OUTLET_STRIP_Z = BACK_OUTLET_Z + 0.11 // extension strip (on the Mini PC shelf) plugs in here
+
+/** One flush wall outlet: white plate with a dark socket and a plug with its cord. */
+function WallOutlet({ z }) {
   const wx = BACK_X
-  const zc = BACK_OUTLET_Z // strip centre
   return (
     <group>
-      {/* Wall outlet plate */}
-      <Block position={[wx - 0.006, 0.42, zc - 0.45]} size={[0.012, 0.12, 0.08]} color="#f5f5f4" shadow={false} />
-      <Block position={[wx - 0.013, 0.42, zc - 0.45]} size={[0.004, 0.05, 0.03]} color="#374151" shadow={false} />
-      {/* Extension strip with 4 sockets and a lit switch, facing into the room (-x) */}
-      <Block position={[wx - 0.03, 0.45, zc]} size={[0.06, 0.06, 0.42]} color="#fafafa" />
-      {[-0.13, -0.05, 0.03, 0.11].map((dz) => (
-        <Block key={dz} position={[wx - 0.061, 0.45, zc + dz]} size={[0.004, 0.035, 0.045]} color="#1f2937" shadow={false} />
+      <Block position={[wx - 0.006, OUTLET_Y, z]} size={[0.012, 0.13, 0.085]} color="#f5f5f4" shadow={false} />
+      <Block position={[wx - 0.013, OUTLET_Y + 0.01, z]} size={[0.004, 0.06, 0.035]} color="#111827" shadow={false} />
+      <Block position={[wx - 0.025, OUTLET_Y + 0.01, z]} size={[0.024, 0.03, 0.025]} color="#e5e7eb" shadow={false} />
+    </group>
+  )
+}
+
+/**
+ * Back wall power: two wall outlets below the wall fan. The wall fan's cord runs
+ * down into one; the extension strip on the Mini PC shelf plugs into the other.
+ */
+function BackWallOutlets({ showLabels }) {
+  const wx = BACK_X - 0.02
+  return (
+    <group>
+      <WallOutlet z={OUTLET_FAN_Z} />
+      <WallOutlet z={OUTLET_STRIP_Z} />
+      {/* Wall fan cord -> outlet */}
+      <Line
+        points={[
+          [wx, WALL_FAN_Y - 0.08, BACK_OUTLET_Z],
+          [wx, OUTLET_Y + 0.12, OUTLET_FAN_Z - 0.02],
+          [wx - 0.01, OUTLET_Y + 0.02, OUTLET_FAN_Z],
+        ]}
+        color="#e5e7eb"
+        lineWidth={2}
+      />
+      {/* Extension strip cord: Mini PC shelf -> beside the helmet rack -> outlet */}
+      <Line
+        points={[
+          [BACK_X - 0.2, MINI_SHELF_Y + 0.01, -1.93],
+          [wx, MINI_SHELF_Y - 0.02, -2.02],
+          [wx, MINI_SHELF_Y - 0.08, HELMET_RACK.z1 - 0.15],
+          [wx, OUTLET_Y + 0.12, OUTLET_STRIP_Z + 0.02],
+          [wx - 0.01, OUTLET_Y + 0.02, OUTLET_STRIP_Z],
+        ]}
+        color="#9ca3af"
+        lineWidth={2}
+      />
+      <Label show={showLabels} side="classroom" position={[BACK_X - 0.2, OUTLET_Y + 0.3, BACK_OUTLET_Z]}>
+        Wall outlets
+      </Label>
+    </group>
+  )
+}
+
+/**
+ * Extension power strip lying on the Mini PC shelf. Every powered device is
+ * plugged into it: the Mini PC beside it, and (via one cord along the walls)
+ * the DITO, Mercusys and ESP32 + GSM on the rear-door shelf.
+ */
+function PowerStrip({ showLabels }) {
+  const sx = BACK_X - 0.2
+  const sy = MINI_SHELF_Y + 0.022
+  const sz = -1.76
+  const run = BACK_X - 0.02
+  const cordY = 2.82
+  return (
+    <group>
+      <Block position={[sx, sy, sz]} size={[0.07, 0.045, 0.34]} color="#fafafa" />
+      {[-0.11, -0.04, 0.03, 0.1].map((dz) => (
+        <Block key={dz} position={[sx, sy + 0.024, sz + dz]} size={[0.045, 0.004, 0.04]} color="#1f2937" shadow={false} />
       ))}
       <Block
-        position={[wx - 0.061, 0.45, zc + 0.18]}
-        size={[0.006, 0.025, 0.03]}
+        position={[sx, sy + 0.025, sz - 0.15]}
+        size={[0.03, 0.006, 0.025]}
         color="#f97316"
         mat={{ emissive: '#f97316', emissiveIntensity: 1.2 }}
         shadow={false}
       />
-      {/* Cords: outlet -> strip; strip -> up the back wall -> Mini PC shelf;
-          strip -> along the base -> up beside the rear door -> door shelf */}
-      <Line points={[[wx - 0.02, 0.4, zc - 0.45], [wx - 0.02, 0.38, zc - 0.33], [wx - 0.03, 0.44, zc - 0.22]]} color="#e5e7eb" lineWidth={2} />
+      {/* Strip -> Mini PC */}
+      <Line points={[[sx, sy + 0.03, sz + 0.1], [sx + 0.02, sy + 0.04, -1.5], [DEVICES.miniPc[0], sy + 0.02, -1.54]]} color="#9ca3af" lineWidth={2} />
+      {/* Strip -> along the back wall and door wall -> drops to the rear-door shelf devices */}
       <Line
         points={[
-          [wx - 0.04, 0.48, zc + 0.22],
-          [wx - 0.02, 0.6, zc + 0.3],
-          [wx - 0.02, 2.5, zc + 0.3],
-          [wx - 0.02, 2.58, -1.9],
+          [sx, sy + 0.03, sz + 0.03],
+          [run, cordY, -1.6],
+          [run, cordY, -0.12],
+          [DEVICES.dito[0], cordY, -0.12],
         ]}
         color="#9ca3af"
         lineWidth={2}
       />
-      <Line
-        points={[
-          [wx - 0.04, 0.44, zc + 0.22],
-          [wx - 0.02, 0.33, zc + 0.4],
-          [wx - 0.02, 0.33, -0.13],
-          [REAR_DOOR.x2 + 0.2, 0.33, -0.13],
-          [REAR_DOOR.x2 + 0.2, 2.56, -0.13],
-          [3.75, 2.62, -0.3],
-        ]}
-        color="#9ca3af"
-        lineWidth={2}
-      />
-      <Label show={showLabels} side="classroom" position={[wx - 0.2, 0.75, zc]}>
+      {[
+        [DEVICES.dito[0], -0.2, DEVICES.dito[1] + 0.05],
+        [DEVICES.mercusys[0], -0.16, DEVICES.mercusys[1] + 0.02],
+        [DEVICES.esp[0], -0.2, DEVICES.esp[1] + 0.02],
+      ].map(([dx, dz, dy]) => (
+        <Line key={dx} points={[[dx, cordY, -0.12], [dx, dy + 0.02, dz]]} color="#9ca3af" lineWidth={2} />
+      ))}
+      <Label show={showLabels} side="classroom" position={[sx, sy + 0.25, sz]}>
         Power outlet strip
       </Label>
     </group>
@@ -1324,8 +1374,9 @@ const CHAIR_COLS = [
  * Room B 301 layout (room-local coordinates; students face -x, the front):
  *   FRONT wall  x = -6 (next to the stairs): mini-whiteboard | chalkboard + TV |
  *               whiteboard | posters; one teacher's table centred in front of them
- *   BACK wall   x = +4 (next to Room 302): vision board | power outlet strip (middle,
+ *   BACK wall   x = +4 (next to Room 302): vision board | 2 wall outlets (middle,
  *               wall fan above) | helmet rack beside the rear door, Mini PC shelf above it
+ *               (with the extension strip that powers every device)
  *   RIGHT wall  z = -6: two windows, white wavy grilles, yellow curtains
  *   LEFT wall   z =  0 (hallway): emergency front door | 3 curtained windows |
  *               exit terminal | rear door (entry/exit) with the device shelf above it
@@ -1383,9 +1434,9 @@ function Room301Interior({ showLabels }) {
       {/* Student armchairs: 6 rows, 5 + 5 across with a centre aisle, all facing the front */}
       {CHAIR_ROWS.map((x) => CHAIR_COLS.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} rotY={Math.PI / 2} scale={0.9} />))}
 
-      {/* BACK wall: vision board, outlet strip in the middle (fan above), helmet rack by the rear door */}
+      {/* BACK wall: vision board, 2 wall outlets in the middle (fan above), helmet rack by the rear door */}
       <VisionBoard />
-      <PowerExtension showLabels={showLabels} />
+      <BackWallOutlets showLabels={showLabels} />
       <SafetyDisplay />
 
       {/* Electric wall fans (top-centre of each wall) + ceiling orbit fans */}
@@ -1393,9 +1444,7 @@ function Room301Interior({ showLabels }) {
       <WallFan position={[BACK_X, WALL_FAN_Y, BACK_OUTLET_Z]} rotY={-Math.PI / 2} />
       <WallFan position={[(HALL_WINDOWS[1].x1 + HALL_WINDOWS[1].x2) / 2, WALL_FAN_Y, -0.1]} rotY={Math.PI} />
       <WallFan position={[(SIDE_WINDOWS[0].x2 + SIDE_WINDOWS[1].x1) / 2, WALL_FAN_Y, D]} rotY={0} />
-      {[-3.8, -1.0, 1.8].map((x) => (
-        <CeilingFan key={x} x={x} z={D / 2} />
-      ))}
+      <CeilingFan x={(ROOM.x1 + ROOM.x2) / 2} z={D / 2} />
 
       {/* Overhead fluorescent fixtures + their light */}
       {[-3.8, -1.0, 1.8].map((x) => [-1.8, -4.2].map((z) => <FluorescentLight key={`${x}${z}`} x={x} z={z} />))}
@@ -1543,16 +1592,18 @@ function MiniPcShelf({ showLabels }) {
   const [x, y, z] = DEVICES.miniPc
   return (
     <group>
-      <Box min={[BACK_X - 0.32, MINI_SHELF_Y - 0.04, -1.9]} max={[BACK_X, MINI_SHELF_Y, -0.9]} color="#1f2937" />
-      {[-1.82, -0.98].map((bz) => (
+      <Box min={[BACK_X - 0.32, MINI_SHELF_Y - 0.04, -2.0]} max={[BACK_X, MINI_SHELF_Y, -0.9]} color="#1f2937" />
+      {[-1.92, -0.98].map((bz) => (
         <Box key={bz} min={[BACK_X - 0.28, MINI_SHELF_Y - 0.2, bz - 0.015]} max={[BACK_X, MINI_SHELF_Y - 0.04, bz + 0.015]} color={COLORS.metal} />
       ))}
       {/* Mini PC: central node, linked to the cloud database */}
       <Block position={[x, y, z]} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
       <Led position={[x - 0.145, y, z - 0.07]} color="#60a5fa" hit="miniPc" />
-      <Label show={showLabels} side="classroom" position={[x - 0.1, y + 0.3, z]}>
+      <Label show={showLabels} side="classroom" position={[x - 0.1, y + 0.3, z + 0.1]}>
         Mini PC
       </Label>
+      {/* Extension strip beside the Mini PC: powers every device */}
+      <PowerStrip showLabels={showLabels} />
     </group>
   )
 }
