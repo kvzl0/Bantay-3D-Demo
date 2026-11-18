@@ -47,7 +47,9 @@ const COLORS = {
   metal: '#3f4650',
   aluminum: '#a3a9b1',
   curtain: '#f5d142',
-  railing: '#2f7d4a',
+  railing: '#5aa564', // light green exterior grilles (site photo)
+  handrail: '#4a2512', // dark brown wooden stair handrail
+  iron: '#151515', // black iron balusters
   concrete: '#cfc8b6',
   concreteLight: '#ddd6c4',
   slab: '#d9d2bf',
@@ -586,6 +588,34 @@ function GridPanel({ position, width, height, color, cell, rotY = 0 }) {
   )
 }
 
+/**
+ * Transparent running-bond ("brick") grille, as on the building's hallway railings:
+ * horizontal bars every row, with the short vertical bars offset half a brick
+ * from one row to the next. One tile = 1 brick wide x 2 rows tall.
+ */
+const brickCanvas = (color) =>
+  cachedCanvas(`brick-${color}`, (c, g) => {
+    c.width = c.height = 64
+    g.clearRect(0, 0, 64, 64)
+    g.fillStyle = color
+    g.fillRect(0, 0, 64, 5) // horizontal bar (row 1)
+    g.fillRect(0, 32, 64, 5) // horizontal bar (row 2)
+    g.fillRect(0, 0, 5, 32) // vertical bar, row 1
+    g.fillRect(32, 32, 5, 32) // vertical bar, row 2 (offset)
+  })
+
+const BRICK = { w: 0.36, h: 0.3 } // one tile: brick width x two rows
+
+function BrickPanel({ position, width, height, color }) {
+  const tex = useMemo(() => canvasTexture(brickCanvas(color), [width / BRICK.w, height / BRICK.h]), [color, width, height])
+  return (
+    <mesh position={position}>
+      <planeGeometry args={[width, height]} />
+      <meshStandardMaterial map={tex} alphaTest={0.5} side={THREE.DoubleSide} metalness={0.3} roughness={0.5} />
+    </mesh>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Building: courtyard, floors, room fronts, roof                      */
 /* ------------------------------------------------------------------ */
@@ -869,43 +899,126 @@ function RoomRear({ detailed }) {
 }
 
 const PARAPET_H = 1.0 // solid waist-level wall
-const GRILLE_H = 1.0 // green grid grille on top of it
+const GRILLE_H = 0.9 // light-green brick-pattern grille on top of it
 const PARAPET_T = 0.15 // wall thickness
+const COLUMN = { half: 0.18, z1: HALL_Z - 0.3, z2: HALL_Z + 0.12 } // square exterior columns
+// Exterior columns along the hallway edge: stair corner, every room partition and mid-room
+const HALL_COLUMNS = [
+  STAIR.x1 + COLUMN.half,
+  ...Array.from({ length: 7 }, (_, i) => ROOM.x1 + i * (ROOM_W / 2)),
+].map((x) => Math.min(x, BUILDING.x2 - COLUMN.half))
 
 /**
- * Exterior hallway barrier ("harang"): a solid waist-level concrete wall painted
- * pale yellow with a dark brown lower border, with the green metal grid grille
- * mounted on top. Built along local +x from 0 to `length`, centred on z = 0.
+ * Exterior hallway barrier ("harang"), matching the building photos: a solid
+ * waist-level wall (plain pale yellow outside, dark brown lower border on the
+ * hallway face only), a concrete coping, and a light-green running-bond grille
+ * framed by a top rail, bottom rail and posts. Built along local +x from 0 to
+ * `length`; local -z is the hallway (inside) face. `posts` = local x of frame posts.
  */
-function HallwayBarrier({ length }) {
+function HallwayBarrier({ length, posts = [] }) {
   const L = length
   const t = PARAPET_T / 2
   const gy = PARAPET_H + 0.05 // grille base (on top of the coping)
-  const metal = { metalness: 0.5, roughness: 0.4 }
-  const posts = []
-  for (let x = 0; x <= L + 0.01; x += 2) posts.push(Math.min(x, L - 0.025))
+  const metal = { metalness: 0.4, roughness: 0.45 }
+  const allPosts = [0.025, ...posts.filter((x) => x > 0.05 && x < L - 0.05), L - 0.025]
   return (
     <group>
-      {/* Solid waist-level wall, coping and dark brown lower border (both faces) */}
       <Box min={[0, 0, -t]} max={[L, PARAPET_H, t]} color={COLORS.wall} />
       <Box min={[0, PARAPET_H, -t - 0.015]} max={[L, gy, t + 0.015]} color={COLORS.slab} />
-      <Box min={[0, 0, -t - 0.02]} max={[L, 0.25, t + 0.02]} color={COLORS.baseboard} shadow={false} />
-      {/* Green metal grid grille mounted on top */}
-      <GridPanel position={[L / 2, gy + GRILLE_H / 2, 0]} width={L} height={GRILLE_H} color={COLORS.railing} cell={0.15} />
-      <Box min={[0, gy + GRILLE_H, -0.025]} max={[L, gy + GRILLE_H + 0.05, 0.025]} color={COLORS.railing} mat={metal} shadow={false} />
-      <Box min={[0, gy, -0.02]} max={[L, gy + 0.04, 0.02]} color={COLORS.railing} mat={metal} shadow={false} />
-      {posts.map((x) => (
+      <Box min={[0, 0, -t - 0.02]} max={[L, 0.25, -t]} color={COLORS.baseboard} shadow={false} />
+      <BrickPanel position={[L / 2, gy + GRILLE_H / 2, 0]} width={L} height={GRILLE_H} color={COLORS.railing} />
+      <Box min={[0, gy + GRILLE_H, -0.03]} max={[L, gy + GRILLE_H + 0.05, 0.03]} color={COLORS.railing} mat={metal} shadow={false} />
+      <Box min={[0, gy, -0.025]} max={[L, gy + 0.04, 0.025]} color={COLORS.railing} mat={metal} shadow={false} />
+      {allPosts.map((x) => (
         <Block key={x} position={[x, gy + GRILLE_H / 2, 0]} size={[0.05, GRILLE_H, 0.05]} color={COLORS.railing} mat={metal} shadow={false} />
       ))}
     </group>
   )
 }
 
-/** Barrier along the open hallway edge, from the left stair landing past every classroom. */
+/**
+ * Hallway edge of one floor, from the left stair landing past every classroom:
+ * the barrier in bays between square exterior columns, plus the deep edge beam
+ * under the slab above (same on every floor).
+ */
 function HallwayRailing() {
+  const x0 = STAIR.x1
+  const posts = HALL_COLUMNS.flatMap((cx) => [cx - COLUMN.half - 0.03 - x0, cx + COLUMN.half + 0.03 - x0])
   return (
-    <group position={[STAIR.x1, 0, HALL_Z - PARAPET_T / 2]}>
-      <HallwayBarrier length={BUILDING.x2 - STAIR.x1} />
+    <group>
+      <group position={[x0, 0, HALL_Z - PARAPET_T / 2]}>
+        <HallwayBarrier length={BUILDING.x2 - x0} posts={posts} />
+      </group>
+      {HALL_COLUMNS.map((cx) => (
+        <Box key={cx} min={[cx - COLUMN.half, 0, COLUMN.z1]} max={[cx + COLUMN.half, WALL_H, COLUMN.z2]} color={COLORS.wall} />
+      ))}
+      <Box min={[x0, WALL_H - 0.28, COLUMN.z1]} max={[BUILDING.x2, WALL_H, COLUMN.z2]} color={COLORS.wall} />
+    </group>
+  )
+}
+
+/**
+ * Stair balustrade from the site photo: black iron balusters with a tall
+ * rectangular loop every fourth bar, a black bottom rail, and a dark brown wooden
+ * handrail. `a`/`b` are the ends of the walking-surface line it follows (sloped
+ * along a flight or level along a landing edge).
+ */
+const RAIL_H = 0.9
+function IronBalustrade({ a, b }) {
+  const { bars, rail, base } = useMemo(() => {
+    const A = new THREE.Vector3(...a)
+    const B = new THREE.Vector3(...b)
+    const dir = B.clone().sub(A)
+    const len = dir.length()
+    const run = Math.hypot(dir.x, dir.z)
+    const n = Math.max(2, Math.round(run / 0.13))
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize())
+    const list = Array.from({ length: n }, (_, k) => {
+      const p = A.clone().lerp(B, (k + 0.5) / n)
+      return { p, loop: k % 4 === 1 }
+    })
+    const mid = A.clone().add(B).multiplyScalar(0.5)
+    return {
+      bars: list,
+      rail: { pos: mid.clone().setY(mid.y + RAIL_H), q, len: len + 0.06 },
+      base: { pos: mid.clone().setY(mid.y + 0.09), q, len },
+    }
+  }, [a, b])
+  const along = new THREE.Vector3(b[0] - a[0], 0, b[2] - a[2]).normalize() // loop width direction
+  const ironMat = <meshStandardMaterial color={COLORS.iron} metalness={0.5} roughness={0.5} />
+  return (
+    <group>
+      <mesh position={rail.pos} quaternion={rail.q} castShadow>
+        <boxGeometry args={[0.07, 0.05, rail.len]} />
+        <meshStandardMaterial color={COLORS.handrail} roughness={0.5} />
+      </mesh>
+      <mesh position={base.pos} quaternion={base.q}>
+        <boxGeometry args={[0.02, 0.02, base.len]} />
+        {ironMat}
+      </mesh>
+      {bars.map(({ p, loop }, i) => (
+        <group key={i} position={[p.x, p.y, p.z]}>
+          <mesh position={[0, (RAIL_H - 0.02) / 2 + 0.01, 0]}>
+            <boxGeometry args={[0.015, RAIL_H - 0.02, 0.015]} />
+            {ironMat}
+          </mesh>
+          {loop &&
+            [-1, 1].map((s) => (
+              <group key={s}>
+                {/* loop sides */}
+                <mesh position={[along.x * 0.05 * s, 0.45, along.z * 0.05 * s]}>
+                  <boxGeometry args={[0.012, 0.34, 0.012]} />
+                  {ironMat}
+                </mesh>
+                {/* loop top / bottom */}
+                <mesh position={[0, 0.45 + 0.17 * s, 0]} rotation={[0, Math.atan2(along.x, along.z), 0]}>
+                  <boxGeometry args={[0.012, 0.012, 0.11]} />
+                  {ironMat}
+                </mesh>
+              </group>
+            ))}
+        </group>
+      ))}
     </group>
   )
 }
@@ -994,28 +1107,31 @@ function Staircase({ showLabels }) {
             <Flight base={f} up />
             <Box min={[STAIR.x1, mid - 0.2, -4.3]} max={[STAIR.x2, mid, -2.7]} color={COLORS.concrete} />
             <Flight base={mid} up={false} />
-            {/* Concrete parapets: outer edge + divider along flight 1, mid-landing edge */}
-            {[STAIR.x1 + 0.05, STAIR_DIVIDER].map((x) => (
-              <Block
-                key={x}
-                position={[x, f + STORY / 4 + 0.45, -1.3]}
-                size={[0.1, 0.9, Math.hypot(2.8, STORY / 2)]}
-                rotation={[SLOPE, 0, 0]}
-                color={COLORS.concrete}
-              />
-            ))}
+            {/* Concrete parapet on the outer edge of flight 1 and the mid landing */}
+            <Block
+              position={[STAIR.x1 + 0.05, f + STORY / 4 + 0.45, -1.3]}
+              size={[0.1, 0.9, Math.hypot(2.8, STORY / 2)]}
+              rotation={[SLOPE, 0, 0]}
+              color={COLORS.concrete}
+            />
             <Box min={[STAIR.x1, mid, -4.3]} max={[STAIR.x1 + 0.1, mid + 0.9, -2.7]} color={COLORS.concrete} />
+            {/* Iron balustrade + wooden handrail along the inner edge of both flights */}
+            <IronBalustrade a={[STAIR_DIVIDER - 0.03, f, 0.1]} b={[STAIR_DIVIDER - 0.03, mid, -2.7]} />
+            <IronBalustrade a={[STAIR_DIVIDER + 0.03, mid, -2.7]} b={[STAIR_DIVIDER + 0.03, f + STORY, 0.1]} />
           </group>
         )
       })}
+      {/* Top floor: the same balustrade guards the stair opening's edge on the landing */}
+      <IronBalustrade a={[STAIR.x1 + 0.12, TOP_Y, 0.14]} b={[STAIR_DIVIDER - 0.03, TOP_Y, 0.14]} />
       {/* Stairwell back wall */}
       <Box min={[STAIR.x1, 0, -4.4]} max={[STAIR.x2, ROOF_TOP - 0.2, -4.3]} color={COLORS.wall} />
       <Box min={[STAIR.x1, 0, -4.3]} max={[STAIR.x2, 0.3, -4.26]} color={COLORS.baseboard} />
       {/* Same waist wall + green grille on the upper landings' open left side
-          (rotated so local +x runs from the hallway edge back toward z = 0.1) */}
+          (rotated so local +x runs from z = 0.1 toward the hallway edge and the
+          inside face, with its dark brown border, faces the landing) */}
       {[STORY, TOP_Y].map((y) => (
-        <group key={y} position={[STAIR.x1 + PARAPET_T / 2, y, HALL_Z - PARAPET_T]} rotation={[0, Math.PI / 2, 0]}>
-          <HallwayBarrier length={HALL_Z - PARAPET_T - 0.1} />
+        <group key={y} position={[STAIR.x1 + PARAPET_T / 2, y, 0.1]} rotation={[0, -Math.PI / 2, 0]}>
+          <HallwayBarrier length={COLUMN.z1 - 0.1} />
         </group>
       ))}
       <Label show={showLabels} side="hallway" position={[(STAIR.x1 + STAIR.x2) / 2, TOP_Y + 2.4, 1.6]}>
@@ -1255,57 +1371,57 @@ function CeilingFan({ x, z }) {
   )
 }
 
-/* Two wall outlets side by side in the middle of the back wall, below the wall fan */
+/* One duplex wall outlet in the middle of the back wall, below the wall fan */
 const OUTLET_Y = 0.42
-const OUTLET_FAN_Z = BACK_OUTLET_Z - 0.11 // wall fan plugs in here
-const OUTLET_STRIP_Z = BACK_OUTLET_Z + 0.11 // extension strip (on the Mini PC shelf) plugs in here
-
-/** One flush wall outlet: white plate with a dark socket and a plug with its cord. */
-function WallOutlet({ z }) {
-  const wx = BACK_X
-  return (
-    <group>
-      <Block position={[wx - 0.006, OUTLET_Y, z]} size={[0.012, 0.13, 0.085]} color="#f5f5f4" shadow={false} />
-      <Block position={[wx - 0.013, OUTLET_Y + 0.01, z]} size={[0.004, 0.06, 0.035]} color="#111827" shadow={false} />
-      <Block position={[wx - 0.025, OUTLET_Y + 0.01, z]} size={[0.024, 0.03, 0.025]} color="#e5e7eb" shadow={false} />
-    </group>
-  )
-}
+const PLUG_DZ = 0.025 // the two sockets sit side by side, +/- this along the wall
 
 /**
- * Back wall power: two wall outlets below the wall fan. The wall fan's cord runs
- * down into one; the extension strip on the Mini PC shelf plugs into the other.
+ * Back wall power: a single duplex wall outlet (one plate, two sockets) below the
+ * wall fan. Both plugs' cords rise straight up side by side: the left one to the
+ * wall fan, the right one to the extension strip on the Mini PC shelf.
  */
 function BackWallOutlets({ showLabels }) {
-  const wx = BACK_X - 0.02
+  const wx = BACK_X
+  const zc = BACK_OUTLET_Z
+  const run = BACK_X - 0.02 // cords run flat against the wall
+  const fanZ = zc - PLUG_DZ
+  const stripZ = zc + PLUG_DZ
+  const topY = MINI_SHELF_Y - 0.06 // where the strip cord turns toward the Mini PC shelf
   return (
     <group>
-      <WallOutlet z={OUTLET_FAN_Z} />
-      <WallOutlet z={OUTLET_STRIP_Z} />
-      {/* Wall fan cord -> outlet */}
+      {/* Plate + two sockets + two plugs */}
+      <Block position={[wx - 0.006, OUTLET_Y, zc]} size={[0.012, 0.11, 0.12]} color="#f5f5f4" shadow={false} />
+      {[fanZ, stripZ].map((z) => (
+        <group key={z}>
+          <Block position={[wx - 0.013, OUTLET_Y, z]} size={[0.004, 0.05, 0.032]} color="#111827" shadow={false} />
+          <Block position={[wx - 0.026, OUTLET_Y, z]} size={[0.026, 0.032, 0.024]} color="#e5e7eb" shadow={false} />
+        </group>
+      ))}
+      {/* Wall fan cord: straight up from the left plug into the fan */}
       <Line
         points={[
-          [wx, WALL_FAN_Y - 0.08, BACK_OUTLET_Z],
-          [wx, OUTLET_Y + 0.12, OUTLET_FAN_Z - 0.02],
-          [wx - 0.01, OUTLET_Y + 0.02, OUTLET_FAN_Z],
+          [run, OUTLET_Y + 0.02, fanZ],
+          [run, WALL_FAN_Y - 0.1, fanZ],
+          [run, WALL_FAN_Y - 0.07, zc],
         ]}
         color="#e5e7eb"
         lineWidth={2}
       />
-      {/* Extension strip cord: Mini PC shelf -> beside the helmet rack -> outlet */}
+      {/* Extension strip cord: straight up beside it, then along the wall above the
+          helmet rack and onto the strip on the Mini PC shelf */}
       <Line
         points={[
-          [BACK_X - 0.2, MINI_SHELF_Y + 0.01, -1.93],
-          [wx, MINI_SHELF_Y - 0.02, -2.02],
-          [wx, MINI_SHELF_Y - 0.08, HELMET_RACK.z1 - 0.15],
-          [wx, OUTLET_Y + 0.12, OUTLET_STRIP_Z + 0.02],
-          [wx - 0.01, OUTLET_Y + 0.02, OUTLET_STRIP_Z],
+          [run, OUTLET_Y + 0.02, stripZ],
+          [run, topY, stripZ],
+          [run, topY, -2.02],
+          [run, MINI_SHELF_Y + 0.02, -2.02],
+          [BACK_X - 0.2, MINI_SHELF_Y + 0.02, -1.94],
         ]}
         color="#9ca3af"
         lineWidth={2}
       />
-      <Label show={showLabels} side="classroom" position={[BACK_X - 0.2, OUTLET_Y + 0.3, BACK_OUTLET_Z]}>
-        Wall outlets
+      <Label show={showLabels} side="classroom" position={[BACK_X - 0.2, OUTLET_Y + 0.3, zc]}>
+        Wall outlet
       </Label>
     </group>
   )
