@@ -25,10 +25,10 @@
  *
  * Author: Kiev Gonzales (kvzl0)
  */
-import { createContext, useContext, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Billboard, Html, Line, OrbitControls } from '@react-three/drei'
+import { Billboard, Html, Line, OrbitControls, Sky } from '@react-three/drei'
 
 /* ------------------------------------------------------------------ */
 /* Constants & helpers                                                 */
@@ -150,8 +150,11 @@ function walk(points, from, { face, speed = WALK_SPEED } = {}) {
 /* Student routes (world coordinates)                                  */
 /* ------------------------------------------------------------------ */
 
-const COURTYARD_START = [-13.5, 0, 6.5]
-const COURTYARD_ROT = [0, 2.5, 0]
+// The stairwell is enclosed; students enter it from the courtyard through the
+// open ground-floor front of the stair landing.
+const COURTYARD_START = [-8.2, 0, 9.0]
+const COURTYARD_ROT = [0, Math.PI, 0]
+const STAIR_ENTRANCE = [-8.6, 0, 3.6] // just outside the ground-floor stair opening
 
 /** Ground floor -> top floor via the left-side switchback concrete staircase. */
 function stairClimbPoints() {
@@ -303,11 +306,18 @@ function makeEntryTimeline() {
   // 1. Courtyard -> up the left-side stairs -> top hallway -> outdoor entry terminal
   const climb = stairClimbPoints()
   const approach = walk(
-    [COURTYARD_START, ...climb, top([FLIGHT_IN.cx, 0, 1.5]), top([AT_ENTRY_TERMINAL[0], 0, 1.5]), top(AT_ENTRY_TERMINAL)],
+    [
+      COURTYARD_START,
+      STAIR_ENTRANCE,
+      ...climb,
+      top([FLIGHT_IN.cx, 0, 1.5]),
+      top([AT_ENTRY_TERMINAL[0], 0, 1.5]),
+      top(AT_ENTRY_TERMINAL),
+    ],
     0,
     { face: Math.PI },
   )
-  const reachedTopHall = approach.timeAt(climb.length) // top-floor stair landing
+  const reachedTopHall = approach.timeAt(climb.length + 1) // top-floor stair landing (after courtyard + entrance)
   // 2. Face scan at the hallway terminal
   const s0 = approach.to + 0.2
   const scan = { terminal: 'entry', from: s0, to: s0 + 2, granted: s0 + 1.4 }
@@ -367,6 +377,7 @@ function makeExitTimeline() {
       top([DOOR_LANE_X, 0, 1.5]), // index 2: outside, clear of the door leaf
       top([FLIGHT_IN.cx, 0, 1.5]), // west along the hallway to the stair landing
       ...stairClimbPoints().reverse(),
+      STAIR_ENTRANCE,
       COURTYARD_START,
     ],
     scan.to + 0.4,
@@ -410,8 +421,9 @@ const VIEWS = {
   classroom: { label: 'Classroom', pos: [-4.6, TOP_Y + 2.7, -5.2], target: [3.0, TOP_Y + 1.6, -1.2] },
   overview: { label: 'Overview', pos: [30, 22, 34], target: [5, 4.5, -1] },
 }
-// Follow camera sits to the front-left so the left-side stairwell isn't hidden by the building
-const FOLLOW_OFFSET = new THREE.Vector3(-4.5, 3.0, 6.5)
+// Follow camera sits in front (courtyard side): the stairwell's outer side is now a solid wall,
+// so the student is watched through the landings' open fronts and grilles.
+const FOLLOW_OFFSET = new THREE.Vector3(0.5, 3.0, 7.0)
 
 /* ------------------------------------------------------------------ */
 /* Shared simulation clock                                             */
@@ -620,15 +632,292 @@ function BrickPanel({ position, width, height, color }) {
 /* Building: courtyard, floors, room fronts, roof                      */
 /* ------------------------------------------------------------------ */
 
-function Courtyard() {
+/* School grounds (world coordinates). The building's hallway edge is at z = HALL_Z. */
+const GROUNDS = { x1: -26, x2: 38, z1: -12, z2: 26 }
+const GATE = { x1: 9, x2: 17 } // opening in the front perimeter wall
+
+/** 2 m x 2 m texture tile of four concrete pavers. */
+const paverCanvas = () =>
+  cachedCanvas('pavers', (c, g) => {
+    c.width = c.height = 256
+    g.fillStyle = '#a8a39a'
+    g.fillRect(0, 0, 256, 256)
+    const shades = ['#d9d5cc', '#d1cdc3', '#cfcac0', '#d6d2c8']
+    for (let i = 0; i < 2; i++)
+      for (let j = 0; j < 2; j++) {
+        g.fillStyle = shades[i * 2 + j]
+        g.fillRect(i * 128 + 3, j * 128 + 3, 122, 122)
+      }
+  })
+
+/** Facade texture for the neighbouring building: one 3 m bay x one 3.4 m story. */
+const facadeCanvas = () =>
+  cachedCanvas('facade', (c, g) => {
+    c.width = 192
+    c.height = 218
+    g.fillStyle = COLORS.wall
+    g.fillRect(0, 0, 192, 218)
+    g.fillStyle = COLORS.baseboard
+    g.fillRect(0, 200, 192, 18)
+    g.fillStyle = '#2b3138'
+    g.fillRect(28, 60, 136, 100) // window
+    g.fillStyle = '#5b6b78'
+    for (let x = 28; x <= 164; x += 34) g.fillRect(x, 60, 3, 100)
+    for (let y = 60; y <= 160; y += 25) g.fillRect(28, y, 136, 3)
+  })
+
+function Tree({ position, scale = 1, tint = 0 }) {
+  const greens = ['#3f7d3a', '#4c8a3f', '#356d33', '#5a9446']
+  const puffs = [
+    [0, 3.4, 0, 1.6],
+    [0.95, 2.95, 0.45, 1.2],
+    [-0.85, 3.0, -0.5, 1.15],
+    [0.2, 4.3, -0.2, 1.05],
+    [-0.4, 3.6, 0.9, 1.0],
+  ]
+  return (
+    <group position={position} scale={scale}>
+      <mesh position={[0, 1.3, 0]} castShadow>
+        <cylinderGeometry args={[0.17, 0.26, 2.6, 10]} />
+        <meshStandardMaterial color="#6b4f2a" roughness={0.9} />
+      </mesh>
+      {puffs.map(([x, y, z, r], i) => (
+        <mesh key={i} position={[x, y, z]} castShadow>
+          <icosahedronGeometry args={[r, 1]} />
+          <meshStandardMaterial color={greens[(i + tint) % greens.length]} roughness={0.85} flatShading />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Potted palm like the ones along the ground-floor hallway in the photo. */
+function PottedPlant({ position, pot = '#b45f3c' }) {
+  const fronds = Array.from({ length: 7 }, (_, i) => (i / 7) * Math.PI * 2)
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.2, 0]} castShadow>
+        <cylinderGeometry args={[0.23, 0.17, 0.4, 16]} />
+        <meshStandardMaterial color={pot} roughness={0.7} />
+      </mesh>
+      <mesh position={[0, 0.39, 0]}>
+        <cylinderGeometry args={[0.21, 0.21, 0.02, 16]} />
+        <meshStandardMaterial color="#4a3726" />
+      </mesh>
+      {fronds.map((a, i) => (
+        <group key={i} position={[0, 0.55, 0]} rotation={[0, a, 0]}>
+          <mesh position={[0, 0.18, 0.3]} rotation={[-0.75 + (i % 2) * 0.25, 0, 0]} castShadow>
+            <boxGeometry args={[0.1, 0.015, 0.7]} />
+            <meshStandardMaterial color={i % 2 ? '#3f8a3a' : '#4f9d45'} />
+          </mesh>
+        </group>
+      ))}
+      <mesh position={[0, 0.5, 0]}>
+        <cylinderGeometry args={[0.03, 0.04, 0.25, 8]} />
+        <meshStandardMaterial color="#6b4f2a" />
+      </mesh>
+    </group>
+  )
+}
+
+function Bench({ position, rotY = 0 }) {
+  return (
+    <group position={position} rotation={[0, rotY, 0]}>
+      <Block position={[0, 0.45, 0]} size={[1.6, 0.08, 0.45]} color="#c7c1b4" />
+      {[-0.6, 0.6].map((x) => (
+        <Block key={x} position={[x, 0.21, 0]} size={[0.12, 0.42, 0.38]} color="#b5ae9f" />
+      ))}
+    </group>
+  )
+}
+
+/** Raised garden bed: concrete curb, grass top, small shrubs. */
+function GardenBed({ x1, x2, z1, z2 }) {
+  const shrubs = []
+  for (let x = x1 + 0.8; x < x2 - 0.5; x += 1.6) shrubs.push([x, z1 + 0.6], [x + 0.8, z2 - 0.6])
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[6, -0.02, 10]} receiveShadow>
-        <planeGeometry args={[90, 60]} />
+      <Box min={[x1, 0, z1]} max={[x2, 0.32, z2]} color="#bdb6a6" />
+      <Box min={[x1 + 0.12, 0.32, z1 + 0.12]} max={[x2 - 0.12, 0.34, z2 - 0.12]} color="#6f9a4e" shadow={false} />
+      {shrubs.map(([x, z]) => (
+        <mesh key={`${x}${z}`} position={[x, 0.62, z]} castShadow>
+          <icosahedronGeometry args={[0.38, 1]} />
+          <meshStandardMaterial color="#4d8a3c" flatShading />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Philippine flag on a flagpole (canvas-drawn flag). */
+function Flagpole({ position }) {
+  const flag = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 256
+    c.height = 128
+    const g = c.getContext('2d')
+    g.fillStyle = '#0038a8'
+    g.fillRect(0, 0, 256, 64)
+    g.fillStyle = '#ce1126'
+    g.fillRect(0, 64, 256, 64)
+    g.fillStyle = '#ffffff'
+    g.beginPath()
+    g.moveTo(0, 0)
+    g.lineTo(111, 64)
+    g.lineTo(0, 128)
+    g.closePath()
+    g.fill()
+    g.fillStyle = '#fcd116'
+    g.beginPath()
+    g.arc(37, 64, 12, 0, Math.PI * 2)
+    g.fill()
+    for (const [sx, sy] of [
+      [10, 14],
+      [10, 114],
+      [92, 64],
+    ]) {
+      g.beginPath()
+      g.arc(sx, sy, 5, 0, Math.PI * 2)
+      g.fill()
+    }
+    return canvasTexture(c)
+  }, [])
+  return (
+    <group position={position}>
+      <Box min={[-0.7, 0, -0.7]} max={[0.7, 0.35, 0.7]} color="#c7c1b4" />
+      <mesh position={[0, 4.35, 0]} castShadow>
+        <cylinderGeometry args={[0.045, 0.06, 8, 12]} />
+        <meshStandardMaterial color="#d1d5db" metalness={0.7} roughness={0.3} />
+      </mesh>
+      <mesh position={[0, 8.38, 0]}>
+        <sphereGeometry args={[0.09, 12, 12]} />
+        <meshStandardMaterial color="#fcd116" metalness={0.6} />
+      </mesh>
+      <mesh position={[0.92, 7.75, 0]}>
+        <planeGeometry args={[1.8, 0.9]} />
+        <meshStandardMaterial map={flag} side={THREE.DoubleSide} roughness={0.8} />
+      </mesh>
+    </group>
+  )
+}
+
+/** Perimeter wall around the school grounds with a gate and a school-name sign. */
+function PerimeterWall() {
+  const { x1, x2, z1, z2 } = GROUNDS
+  const H = 2.2
+  const T = 0.2
+  const sign = useTextTexture('CLARO M. RECTO HIGH SCHOOL', {
+    w: 1024,
+    h: 128,
+    font: 'bold 64px Arial, Helvetica, sans-serif',
+    bg: '#1e3a8a',
+    fg: '#ffffff',
+  })
+  const seg = (min, max) => (
+    <group key={`${min}`}>
+      <Box min={min} max={[max[0], H, max[2]]} color={COLORS.wall} />
+      <Box min={[min[0] - 0.01, 0, min[2] - 0.01]} max={[max[0] + 0.01, 0.35, max[2] + 0.01]} color={COLORS.baseboard} shadow={false} />
+      <Box min={[min[0] - 0.03, H, min[2] - 0.03]} max={[max[0] + 0.03, H + 0.08, max[2] + 0.03]} color={COLORS.slab} shadow={false} />
+    </group>
+  )
+  const gw = GATE.x2 - GATE.x1
+  return (
+    <group>
+      {seg([x1, 0, z2], [GATE.x1, H, z2 + T])}
+      {seg([GATE.x2, 0, z2], [x2, H, z2 + T])}
+      {seg([x1 - T, 0, z1], [x1, H, z2 + T])}
+      {seg([x2, 0, z1], [x2 + T, H, z2 + T])}
+      {seg([x1 - T, 0, z1 - T], [x2 + T, H, z1])}
+      {/* Gate pillars + name sign */}
+      {[GATE.x1, GATE.x2].map((x) => (
+        <Box key={x} min={[x - 0.3, 0, z2 - 0.2]} max={[x + 0.3, 4.0, z2 + 0.4]} color={COLORS.wall} />
+      ))}
+      <Box min={[GATE.x1, 3.3, z2 - 0.05]} max={[GATE.x2, 3.95, z2 + 0.25]} color="#1e3a8a" />
+      {[
+        [z2 + 0.26, 0],
+        [z2 - 0.06, Math.PI],
+      ].map(([z, r]) => (
+        <mesh key={z} position={[(GATE.x1 + GATE.x2) / 2, 3.625, z]} rotation={[0, r, 0]}>
+          <planeGeometry args={[gw - 0.4, 0.55]} />
+          <meshBasicMaterial map={sign} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Neighbouring two-story school building on the left side of the courtyard. */
+function NeighborBuilding() {
+  const B = { x1: -25, x2: -16, z1: -10, z2: 14, h: 2 * STORY }
+  const side = useMemo(() => canvasTexture(facadeCanvas(), [(B.z2 - B.z1) / 3, 2]), [B.z1, B.z2])
+  const front = useMemo(() => canvasTexture(facadeCanvas(), [(B.x2 - B.x1) / 3, 2]), [B.x1, B.x2])
+  return (
+    <group>
+      <Box min={[B.x1, 0, B.z1]} max={[B.x2, B.h, B.z2]} color={COLORS.wall} />
+      <mesh position={[B.x2 + 0.01, B.h / 2, (B.z1 + B.z2) / 2]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[B.z2 - B.z1, B.h]} />
+        <meshStandardMaterial map={side} roughness={0.85} />
+      </mesh>
+      <mesh position={[(B.x1 + B.x2) / 2, B.h / 2, B.z2 + 0.01]}>
+        <planeGeometry args={[B.x2 - B.x1, B.h]} />
+        <meshStandardMaterial map={front} roughness={0.85} />
+      </mesh>
+      <Box min={[B.x1 - 0.4, B.h, B.z1 - 0.4]} max={[B.x2 + 0.4, B.h + 0.2, B.z2 + 0.4]} color="#b9b3a5" />
+      <Box min={[B.x1 - 0.45, B.h - 0.1, B.z1 - 0.45]} max={[B.x2 + 0.45, B.h + 0.25, B.z1 - 0.4]} color="#2f4a8a" shadow={false} />
+      <Box min={[B.x2 + 0.4, B.h - 0.1, B.z1 - 0.45]} max={[B.x2 + 0.45, B.h + 0.25, B.z2 + 0.45]} color="#2f4a8a" shadow={false} />
+      <Box min={[B.x1 - 0.45, B.h - 0.1, B.z2 + 0.4]} max={[B.x2 + 0.45, B.h + 0.25, B.z2 + 0.45]} color="#2f4a8a" shadow={false} />
+    </group>
+  )
+}
+
+/** School grounds: lawn, paved courtyard, garden beds, trees, plants, benches, flag, walls. */
+function Courtyard() {
+  const { x1, x2, z2 } = GROUNDS
+  const paveZ1 = COLUMN.z2
+  const pave = useMemo(() => canvasTexture(paverCanvas(), [(x2 - x1) / 2, (z2 - paveZ1) / 2]), [x1, x2, z2, paveZ1])
+  return (
+    <group>
+      {/* Lawn everywhere, paved courtyard in front of the building */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[6, -0.03, 6]} receiveShadow>
+        <planeGeometry args={[260, 260]} />
+        <meshStandardMaterial color="#86a35f" roughness={1} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(x1 + x2) / 2, -0.005, (paveZ1 + z2) / 2]} receiveShadow>
+        <planeGeometry args={[x2 - x1, z2 - paveZ1]} />
+        <meshStandardMaterial map={pave} roughness={0.9} />
+      </mesh>
+      {/* Concrete apron around the building's sides and back */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(STAIR.x1 + BUILDING.x2) / 2, -0.01, -7.5]} receiveShadow>
+        <planeGeometry args={[BUILDING.x2 - STAIR.x1 + 3, 3.2]} />
         <meshStandardMaterial color="#c9c3b3" roughness={0.95} />
       </mesh>
-      {/* Garden plot in the courtyard */}
-      <Box min={[0, -0.02, 6]} max={[16, 0.12, 12]} color="#7a9a5a" />
+
+      <GardenBed x1={0} x2={9} z1={9} z2={13} />
+      <GardenBed x1={17} x2={26} z1={9} z2={13} />
+      <GardenBed x1={-14.5} x2={-11} z1={7} z2={13.5} />
+
+      {/* Big mango tree by the stair entrance (as in the photo) + courtyard trees */}
+      <Tree position={[-12.7, 0.3, 10.2]} scale={1.7} />
+      <Tree position={[4.5, 0.3, 11]} scale={1.1} tint={1} />
+      <Tree position={[21.5, 0.3, 11]} scale={1.15} tint={2} />
+      <Tree position={[34, 0, 7]} scale={1.3} tint={3} />
+      <Tree position={[34.5, 0, 20]} scale={1.2} tint={1} />
+      <Tree position={[-20, 0, 21]} scale={1.3} tint={2} />
+      <Tree position={[29, 0, 23.5]} scale={1.0} />
+      <Tree position={[-2, 0, 23.5]} scale={1.0} tint={3} />
+
+      {/* Potted palms along the ground-floor hallway */}
+      {[-3.5, 1.5, 6.5, 11.5, 16.5, 21.5].map((x, i) => (
+        <PottedPlant key={x} position={[x, 0, COLUMN.z2 + 0.45]} pot={i % 2 ? '#8a5a3c' : '#b45f3c'} />
+      ))}
+
+      <Bench position={[4.5, 0, 15.2]} />
+      <Bench position={[21.5, 0, 15.2]} />
+      <Bench position={[-3, 0, 7.5]} rotY={Math.PI / 2} />
+      <Flagpole position={[13, 0, 18]} />
+
+      <NeighborBuilding />
+      <PerimeterWall />
     </group>
   )
 }
@@ -939,10 +1228,11 @@ function HallwayBarrier({ length, posts = [] }) {
 /**
  * Hallway edge of one floor, from the left stair landing past every classroom:
  * the barrier in bays between square exterior columns, plus the deep edge beam
- * under the slab above (same on every floor).
+ * under the slab above (same on every floor). On the ground floor the bay in
+ * front of the stair landing is left open as the entrance to the stairs.
  */
-function HallwayRailing() {
-  const x0 = STAIR.x1
+function HallwayRailing({ stairEntrance = false }) {
+  const x0 = stairEntrance ? ROOM.x1 : STAIR.x1
   const posts = HALL_COLUMNS.flatMap((cx) => [cx - COLUMN.half - 0.03 - x0, cx + COLUMN.half + 0.03 - x0])
   return (
     <group>
@@ -952,7 +1242,8 @@ function HallwayRailing() {
       {HALL_COLUMNS.map((cx) => (
         <Box key={cx} min={[cx - COLUMN.half, 0, COLUMN.z1]} max={[cx + COLUMN.half, WALL_H, COLUMN.z2]} color={COLORS.wall} />
       ))}
-      <Box min={[x0, WALL_H - 0.28, COLUMN.z1]} max={[BUILDING.x2, WALL_H, COLUMN.z2]} color={COLORS.wall} />
+      {/* Edge beam spans the full length (including over the stair entrance) */}
+      <Box min={[STAIR.x1, WALL_H - 0.28, COLUMN.z1]} max={[BUILDING.x2, WALL_H, COLUMN.z2]} color={COLORS.wall} />
     </group>
   )
 }
@@ -1049,10 +1340,11 @@ function FloorLevel({ level, rooms, label, showLabels }) {
         <group key={n} position={[i * ROOM_W, 0, 0]}>
           <RoomFront number={n} detailed={n === 301} />
           <RoomRear detailed={n === 301} />
+          <ClassroomFrontWall shadow={n === 301} />
         </group>
       ))}
 
-      <HallwayRailing />
+      <HallwayRailing stairEntrance={level === 0} />
       <Label show={showLabels} position={[x2 + 1.8, 1.6, 1.5]} tone="light" size="text-[13px]">
         {label} · Rooms {rooms[0]}–{rooms[rooms.length - 1]}
       </Label>
@@ -1066,14 +1358,55 @@ function Roof() {
   useFrame(({ camera }) => {
     ref.current.visible = camera.position.y < ROOF_TOP + 0.3
   })
+  // Low-pitch blue GI-sheet gable roof (blue fascia, as in the building photo)
+  const rx1 = STAIR.x1 - 0.6
+  const rx2 = BUILDING.x2 + 0.6
+  const rz1 = -ROOM.depth - 0.8
+  const rz2 = COLUMN.z2 + 0.6
+  const zc = (rz1 + rz2) / 2
+  const hd = (rz2 - rz1) / 2
+  const rise = 1.3
+  const pitch = Math.atan2(rise, hd)
+  const slope = Math.hypot(hd, rise)
+  const gable = useMemo(() => {
+    const s = new THREE.Shape()
+    s.moveTo(-hd, 0)
+    s.lineTo(hd, 0)
+    s.lineTo(0, rise)
+    s.closePath()
+    return s
+  }, [hd])
+  const blue = '#2f4a8a'
   return (
     <group ref={ref}>
       <Box
-        min={[STAIR.x1 - 0.1, ROOF_TOP - 0.2, -ROOM.depth - 0.2]}
-        max={[BUILDING.x2 + 0.2, ROOF_TOP, HALL_Z + 0.1]}
+        min={[STAIR.x1 - 0.15, ROOF_TOP - 0.2, -ROOM.depth - 0.2]}
+        max={[BUILDING.x2 + 0.2, ROOF_TOP, COLUMN.z2]}
         color="#b9b3a5"
         shadow={false}
       />
+      {[1, -1].map((side) => (
+        <mesh
+          key={side}
+          position={[(rx1 + rx2) / 2, ROOF_TOP + rise / 2, zc + (side * hd) / 2]}
+          rotation={[side * pitch, 0, 0]}
+          castShadow
+        >
+          <boxGeometry args={[rx2 - rx1, 0.06, slope]} />
+          <meshStandardMaterial color="#3b5ba5" roughness={0.55} metalness={0.3} />
+        </mesh>
+      ))}
+      {/* Fascia boards along both eaves */}
+      {[rz1, rz2].map((z) => (
+        <Box key={z} min={[rx1, ROOF_TOP - 0.12, z - 0.03]} max={[rx2, ROOF_TOP + 0.08, z + 0.03]} color={blue} shadow={false} />
+      ))}
+      {/* Gable ends */}
+      {[STAIR.x1 - 0.15, BUILDING.x2 + 0.05].map((x) => (
+        <mesh key={x} position={[x, ROOF_TOP, zc]} rotation={[0, Math.PI / 2, 0]}>
+          <shapeGeometry args={[gable]} />
+          <meshStandardMaterial color={COLORS.wall} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
     </group>
   )
 }
@@ -1085,7 +1418,6 @@ function Roof() {
 const STEPS = 10
 const RISE = STORY / 2 / STEPS
 const TREAD = 2.8 / STEPS
-const SLOPE = Math.atan2(STORY / 2, 2.8)
 
 function Flight({ base, up }) {
   // up = true: flight 1 (outer side) climbs toward -z; false: flight 2 (beside Room 301) climbs toward +z
@@ -1107,14 +1439,6 @@ function Staircase({ showLabels }) {
             <Flight base={f} up />
             <Box min={[STAIR.x1, mid - 0.2, -4.3]} max={[STAIR.x2, mid, -2.7]} color={COLORS.concrete} />
             <Flight base={mid} up={false} />
-            {/* Concrete parapet on the outer edge of flight 1 and the mid landing */}
-            <Block
-              position={[STAIR.x1 + 0.05, f + STORY / 4 + 0.45, -1.3]}
-              size={[0.1, 0.9, Math.hypot(2.8, STORY / 2)]}
-              rotation={[SLOPE, 0, 0]}
-              color={COLORS.concrete}
-            />
-            <Box min={[STAIR.x1, mid, -4.3]} max={[STAIR.x1 + 0.1, mid + 0.9, -2.7]} color={COLORS.concrete} />
             {/* Iron balustrade + wooden handrail along the inner edge of both flights */}
             <IronBalustrade a={[STAIR_DIVIDER - 0.03, f, 0.1]} b={[STAIR_DIVIDER - 0.03, mid, -2.7]} />
             <IronBalustrade a={[STAIR_DIVIDER + 0.03, mid, -2.7]} b={[STAIR_DIVIDER + 0.03, f + STORY, 0.1]} />
@@ -1123,15 +1447,34 @@ function Staircase({ showLabels }) {
       })}
       {/* Top floor: the same balustrade guards the stair opening's edge on the landing */}
       <IronBalustrade a={[STAIR.x1 + 0.12, TOP_Y, 0.14]} b={[STAIR_DIVIDER - 0.03, TOP_Y, 0.14]} />
-      {/* Stairwell back wall */}
-      <Box min={[STAIR.x1, 0, -4.4]} max={[STAIR.x2, ROOF_TOP - 0.2, -4.3]} color={COLORS.wall} />
-      <Box min={[STAIR.x1, 0, -4.3]} max={[STAIR.x2, 0.3, -4.26]} color={COLORS.baseboard} />
-      {/* Same waist wall + green grille on the upper landings' open left side
-          (rotated so local +x runs from z = 0.1 toward the hallway edge and the
-          inside face, with its dark brown border, faces the landing) */}
-      {[STORY, TOP_Y].map((y) => (
-        <group key={y} position={[STAIR.x1 + PARAPET_T / 2, y, 0.1]} rotation={[0, -Math.PI / 2, 0]}>
-          <HallwayBarrier length={COLUMN.z1 - 0.1} />
+      {/* Enclosed stairwell: solid back wall + solid outer (left) wall, ground to roof.
+          The front stays open: hallway grilles on the upper floors, and the stair
+          entrance on the ground floor. */}
+      <Box min={[STAIR.x1 - 0.15, 0, -4.4]} max={[STAIR.x2, ROOF_TOP - 0.2, -4.3]} color={COLORS.wall} />
+      <Box min={[STAIR.x1 - 0.15, 0, -4.3]} max={[STAIR.x1, ROOF_TOP - 0.2, COLUMN.z2]} color={COLORS.wall} />
+      {/* Dark brown lower border inside the stairwell at every floor and mid landing */}
+      {[0, STORY, TOP_Y].map((y) => (
+        <group key={y}>
+          <Box min={[STAIR.x1, y, y === 0 ? -4.3 : 0.1]} max={[STAIR.x1 + 0.04, y + 0.3, COLUMN.z1]} color={COLORS.baseboard} />
+          <Box min={[STAIR.x1, y, -4.3]} max={[STAIR.x2, y + 0.3, -4.26]} color={COLORS.baseboard} />
+        </group>
+      ))}
+      {[STORY / 2, STORY * 1.5].map((y) => (
+        <group key={y}>
+          <Box min={[STAIR.x1, y, -4.3]} max={[STAIR.x1 + 0.04, y + 0.3, -2.7]} color={COLORS.baseboard} />
+          <Box min={[STAIR.x1, y, -4.3]} max={[STAIR.x2, y + 0.3, -4.26]} color={COLORS.baseboard} />
+        </group>
+      ))}
+      {/* Small windows lighting each mid landing */}
+      {[STORY / 2, STORY * 1.5].map((y) => (
+        <group key={`w${y}`}>
+          <Box min={[STAIR.x1 - 0.16, y + 1.0, -4.05]} max={[STAIR.x1 + 0.01, y + 1.05, -3.0]} color={COLORS.aluminum} />
+          <Box min={[STAIR.x1 - 0.16, y + 1.95, -4.05]} max={[STAIR.x1 + 0.01, y + 2.0, -3.0]} color={COLORS.aluminum} />
+          <GridPanel position={[STAIR.x1 - 0.17, y + 1.5, -3.525]} width={1.05} height={0.9} color={COLORS.metal} cell={0.15} rotY={Math.PI / 2} />
+          <mesh position={[STAIR.x1 - 0.165, y + 1.5, -3.525]} rotation={[0, Math.PI / 2, 0]}>
+            <planeGeometry args={[1.05, 0.9]} />
+            <meshStandardMaterial color="#9fb9c4" />
+          </mesh>
         </group>
       ))}
       <Label show={showLabels} side="hallway" position={[(STAIR.x1 + STAIR.x2) / 2, TOP_Y + 2.4, 1.6]}>
@@ -1146,24 +1489,57 @@ function Staircase({ showLabels }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Dark wooden student armchair with a writing tablet on the student's right.
- * Faces local -z; rotY = PI/2 turns it to face -x (Room 301's front wall).
+ * Dark wooden student armchair with a writing tablet on the student's right,
+ * described as boxes in chair-local space (faces local -z). All 540 chairs in
+ * the building are drawn with one instanced mesh per part (see ChairInstances).
  */
-function Armchair({ x, z, rotY = 0, scale = 1 }) {
-  const legs = []
-  for (const dx of [-0.18, 0.18]) for (const dz of [-0.18, 0.18]) legs.push([dx, dz])
-  const s = false // 60 chairs: skip shadows to keep the scene light
-  return (
-    <group position={[x, 0, z]} rotation={[0, rotY, 0]} scale={scale}>
-      <Block position={[0, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.wood} shadow={s} />
-      <Block position={[0, 0.74, 0.2]} size={[0.42, 0.3, 0.03]} color={COLORS.wood} shadow={s} />
-      <Block position={[0.25, 0.73, -0.1]} size={[0.24, 0.025, 0.5]} color={COLORS.wood} shadow={s} />
-      <Block position={[0.33, 0.6, 0.05]} size={[0.03, 0.27, 0.03]} color={COLORS.woodDark} shadow={s} />
-      {legs.map(([dx, dz]) => (
-        <Block key={`${dx}${dz}`} position={[dx, 0.215, dz]} size={[0.03, 0.43, 0.03]} color={COLORS.woodDark} shadow={s} />
-      ))}
-    </group>
-  )
+const CHAIR_PARTS = [
+  { pos: [0, 0.45, 0], size: [0.42, 0.04, 0.42], color: COLORS.wood }, // seat
+  { pos: [0, 0.74, 0.2], size: [0.42, 0.3, 0.03], color: COLORS.wood }, // backrest
+  { pos: [0.25, 0.73, -0.1], size: [0.24, 0.025, 0.5], color: COLORS.wood }, // writing tablet
+  { pos: [0.33, 0.6, 0.05], size: [0.03, 0.27, 0.03], color: COLORS.woodDark }, // tablet post
+  ...[-0.18, 0.18].flatMap((dx) =>
+    [-0.18, 0.18].map((dz) => ({ pos: [dx, 0.215, dz], size: [0.03, 0.43, 0.03], color: COLORS.woodDark })),
+  ), // 4 legs
+]
+
+/** One InstancedMesh per chair part; `matrices` are chair -> world transforms. */
+function ChairInstances({ matrices }) {
+  const refs = useRef([])
+  useLayoutEffect(() => {
+    const part = new THREE.Matrix4()
+    const m = new THREE.Matrix4()
+    CHAIR_PARTS.forEach((p, i) => {
+      const mesh = refs.current[i]
+      if (!mesh) return
+      part.makeTranslation(...p.pos)
+      matrices.forEach((cm, k) => mesh.setMatrixAt(k, m.multiplyMatrices(cm, part)))
+      mesh.instanceMatrix.needsUpdate = true
+    })
+  }, [matrices])
+  return CHAIR_PARTS.map((p, i) => (
+    <instancedMesh key={i} ref={(el) => (refs.current[i] = el)} args={[undefined, undefined, matrices.length]} frustumCulled={false}>
+      <boxGeometry args={p.size} />
+      <meshStandardMaterial color={p.color} roughness={0.7} />
+    </instancedMesh>
+  ))
+}
+
+/** Every classroom on every floor uses Room 301's seating: 6 rows of 5 + 5, facing the front. */
+function AllClassroomChairs() {
+  const matrices = useMemo(() => {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
+    const s = new THREE.Vector3(0.9, 0.9, 0.9)
+    const list = []
+    for (const { level, rooms } of FLOORS)
+      rooms.forEach((_, i) => {
+        for (const x of CHAIR_ROWS)
+          for (const z of CHAIR_COLS)
+            list.push(new THREE.Matrix4().compose(new THREE.Vector3(x + i * ROOM_W, level * STORY, z), q, s))
+      })
+    return list
+  }, [])
+  return <ChairInstances matrices={matrices} />
 }
 
 function FluorescentLight({ x, z }) {
@@ -1497,13 +1873,25 @@ const CHAIR_COLS = [
  *   LEFT wall   z =  0 (hallway): emergency front door | 3 curtained windows |
  *               exit terminal | rear door (entry/exit) with the device shelf above it
  */
-function Room301Interior({ showLabels }) {
+/**
+ * Front wall + teacher's table shared by EVERY classroom (room-local coordinates):
+ * hallway side -> window side: mini-whiteboard, chalkboard + TV, whiteboard, posters;
+ * one teacher's table with a tablecloth centred in front of the boards.
+ */
+function ClassroomFrontWall({ shadow = false }) {
   const D = -ROOM.depth
   const fx = ROOM.x1 + 0.05 // inner face of the front wall
+  const s = shadow
   const board = (z1, z2, y1, y2, face, frame = COLORS.aluminum) => (
     <group>
-      <Box min={[fx, y1, z1]} max={[fx + 0.03, y2, z2]} color={frame} mat={{ metalness: 0.4 }} />
-      <Box min={[fx + 0.03, y1 + 0.05, z1 + 0.05]} max={[fx + 0.045, y2 - 0.05, z2 - 0.05]} color={face} mat={{ roughness: face === '#fafafa' ? 0.2 : 0.95 }} />
+      <Box min={[fx, y1, z1]} max={[fx + 0.03, y2, z2]} color={frame} mat={{ metalness: 0.4 }} shadow={s} />
+      <Box
+        min={[fx + 0.03, y1 + 0.05, z1 + 0.05]}
+        max={[fx + 0.045, y2 - 0.05, z2 - 0.05]}
+        color={face}
+        mat={{ roughness: face === '#fafafa' ? 0.2 : 0.95 }}
+        shadow={s}
+      />
     </group>
   )
   const posters = []
@@ -1513,15 +1901,14 @@ function Room301Interior({ showLabels }) {
   return (
     <group>
       {/* Lower dark brown border on the inside faces */}
-      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x2 - 0.05, 0.3, D + 0.04]} color={COLORS.baseboard} />
-      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
-      <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} />
+      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x2 - 0.05, 0.3, D + 0.04]} color={COLORS.baseboard} shadow={s} />
+      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} shadow={s} />
+      <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} shadow={s} />
 
-      {/* FRONT wall (hallway side -> window side): mini-whiteboard, chalkboard + TV, whiteboard, posters */}
       {board(-1.15, -0.45, 1.3, 2.0, '#fafafa')}
       {board(-3.0, -1.35, 0.95, 2.3, '#1f4d34', '#5a3a1e')}
-      <Box min={[fx, 0.92, -3.0]} max={[fx + 0.1, 0.95, -1.35]} color="#5a3a1e" />
-      <Block position={[fx + 0.08, 1.72, -2.17]} size={[0.05, 0.55, 0.95]} color="#0b0b0d" />
+      <Box min={[fx, 0.92, -3.0]} max={[fx + 0.1, 0.95, -1.35]} color="#5a3a1e" shadow={s} />
+      <Block position={[fx + 0.08, 1.72, -2.17]} size={[0.05, 0.55, 0.95]} color="#0b0b0d" shadow={s} />
       <mesh position={[fx + 0.106, 1.72, -2.17]} rotation={[0, Math.PI / 2, 0]}>
         <planeGeometry args={[0.88, 0.48]} />
         <meshStandardMaterial color="#111827" emissive="#1e293b" emissiveIntensity={0.4} roughness={0.2} />
@@ -1531,25 +1918,33 @@ function Room301Interior({ showLabels }) {
         <Block key={`${z}${y}`} position={[fx + 0.005, y, z]} size={[0.01, 0.22, 0.19]} color={color} shadow={false} />
       ))}
 
-      {/* One teacher's table with a tablecloth, centred in front of the boards */}
       <group position={[-4.9, 0, D / 2]}>
         {[-0.3, 0.3].map((dx) =>
           [-0.65, 0.65].map((dz) => (
-            <Block key={`${dx}${dz}`} position={[dx, 0.37, dz]} size={[0.05, 0.74, 0.05]} color={COLORS.woodDark} />
+            <Block key={`${dx}${dz}`} position={[dx, 0.37, dz]} size={[0.05, 0.74, 0.05]} color={COLORS.woodDark} shadow={s} />
           )),
         )}
-        <Block position={[0, 0.76, 0]} size={[0.75, 0.04, 1.45]} color={COLORS.wood} />
-        <Block position={[0, 0.785, 0]} size={[0.82, 0.012, 1.52]} color={cloth} />
-        <Block position={[0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} />
-        <Block position={[-0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} />
+        <Block position={[0, 0.76, 0]} size={[0.75, 0.04, 1.45]} color={COLORS.wood} shadow={s} />
+        <Block position={[0, 0.785, 0]} size={[0.82, 0.012, 1.52]} color={cloth} shadow={s} />
+        <Block position={[0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} shadow={s} />
+        <Block position={[-0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} shadow={s} />
         {/* Teacher's chair between the table and the boards */}
-        <Block position={[-0.6, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.woodDark} />
-        <Block position={[-0.8, 0.72, 0]} size={[0.03, 0.5, 0.42]} color={COLORS.woodDark} />
+        <Block position={[-0.6, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.woodDark} shadow={s} />
+        <Block position={[-0.8, 0.72, 0]} size={[0.03, 0.5, 0.42]} color={COLORS.woodDark} shadow={s} />
       </group>
+    </group>
+  )
+}
 
-      {/* Student armchairs: 6 rows, 5 + 5 across with a centre aisle, all facing the front */}
-      {CHAIR_ROWS.map((x) => CHAIR_COLS.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} rotY={Math.PI / 2} scale={0.9} />))}
-
+/**
+ * Room B 301's own fixtures (the front wall, table and chairs are shared by every
+ * classroom: see ClassroomFrontWall and AllClassroomChairs).
+ */
+function Room301Interior({ showLabels }) {
+  const D = -ROOM.depth
+  const fx = ROOM.x1 + 0.05 // inner face of the front wall
+  return (
+    <group>
       {/* BACK wall: vision board, 2 wall outlets in the middle (fan above), helmet rack by the rear door */}
       <VisionBoard />
       <BackWallOutlets showLabels={showLabels} />
@@ -2068,27 +2463,30 @@ function CameraRig({ viewRequest, autoFollow }) {
 function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
   return (
     <>
-      <color attach="background" args={['#dbe6f0']} />
-      <hemisphereLight args={['#ffffff', '#d6cfc0', 0.85]} />
+      {/* Procedural sky (no textures) + distance fog that blends the lawn into the horizon */}
+      <Sky distance={250} sunPosition={[60, 45, 70]} turbidity={5} rayleigh={1.4} mieCoefficient={0.004} mieDirectionalG={0.8} />
+      <fog attach="fog" args={['#dfe7ee', 80, 230]} />
+      <hemisphereLight args={['#e0ecff', '#9fb07f', 0.85]} />
       <ambientLight intensity={0.25} />
       <directionalLight
-        position={[14, 30, 24]}
-        intensity={1.6}
+        position={[24, 32, 30]}
+        intensity={1.7}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-30}
-        shadow-camera-right={30}
-        shadow-camera-top={30}
-        shadow-camera-bottom={-30}
-        shadow-camera-far={90}
+        shadow-camera-left={-45}
+        shadow-camera-right={45}
+        shadow-camera-top={45}
+        shadow-camera-bottom={-45}
+        shadow-camera-far={120}
         shadow-bias={-0.0004}
       />
 
-      {/* Building B: 3 stories, 3 classrooms each, stairwell beside Room 301 */}
+      {/* Building B: 3 stories, 3 classrooms each, enclosed stairwell beside Room 301 */}
       <Courtyard />
       {FLOORS.map((f) => (
         <FloorLevel key={f.level} {...f} showLabels={showLabels} />
       ))}
+      <AllClassroomChairs />
       <Staircase showLabels={showLabels} />
       <Roof />
 
