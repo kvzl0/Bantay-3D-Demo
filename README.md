@@ -2,7 +2,14 @@
 
 Interactive 3D demo for the capstone project **"A Cloud-based Smart Student Monitoring System with Performance Tracking and Alert System for Claro M. Recto High School"**.
 
-It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. On every floor, the hallway's open side is a solid waist-level wall, painted pale yellow with a dark brown lower border, with green metal grid grilles mounted on top.
+It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. Every floor's hallway edge matches the building photos:
+
+- a solid waist-level wall, plain pale yellow outside, with the dark brown border only on the hallway side
+- a light-green grille on top, with a brick-like pattern of staggered rectangles
+- square columns dividing the hallway edge into bays
+- a deep edge beam under the slab above
+
+The stairs have black iron balusters with tall rectangular loops and a dark brown wooden handrail along every flight. On the top floor, the same railing guards the edge of the stair opening on the landing.
 
 Every classroom's hallway wall has an emergency front door, three curtained windows with grilles, and the rear door. Students use only the rear door to enter and leave.
 
