@@ -12,7 +12,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "commit": "sh scripts/commit.sh"
+    "commit": "sh scripts/commit.sh",
+    "merge": "sh scripts/merge.sh"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",

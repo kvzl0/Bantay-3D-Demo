@@ -15,8 +15,10 @@
  *  - The concrete stairwell is on the LEFT end of the building (x = -10.4..-6).
  *    Room 301 (x = -6..4) sits right beside its top landing; 302 and 303
  *    continue to the right. Floors below repeat the layout (101/201 under 301).
- *  - Entry terminal: outside on the hallway wall. Exit terminal and the
- *    network shelf: inside Room 301, around the door.
+ *  - Entry terminal + fire extinguisher: outside on the hallway wall beside the
+ *    door. Exit terminal and the network shelf: inside Room 301, around the door.
+ *  - Room 301 walls (students face -x): front x = -6 (boards), back x = 4
+ *    (helmet rack, power strip), right z = -6 (windows), left z = 0 (hallway/door).
  *  - Room 301 details, hardware and wires use room-local coordinates and are
  *    rendered inside <group position={[0, TOP_Y, 0]}>. The student and the
  *    cameras use world coordinates.
@@ -161,7 +163,7 @@ function stairClimbPoints() {
 /* Room-local points in front of / inside Room 301 */
 const AT_ENTRY_TERMINAL = [0.6, 0, 1.0] // hallway side, facing the outdoor entry terminal
 const AT_EXIT_TERMINAL = [2.6, 0, -0.9] // inside, facing the indoor exit terminal
-const AT_SEAT = [0.45, 0, -2.6] // aisle beside the student's armchair
+const AT_SEAT = [-0.7, 0, -1.75] // hallway-side aisle, beside the student's armchair
 
 /* ------------------------------------------------------------------ */
 /* Wires & devices (room-301-local coordinates, inside the room)       */
@@ -290,7 +292,7 @@ function makeEntryTimeline() {
   // 3. Door swings inward, 4. student steps inside and walks to the armchair
   const doorOpen = [G + 0.2, G + 1.2]
   const stepIn = walk(
-    [top(AT_ENTRY_TERMINAL), top([1.5, 0, 0.9]), top([1.5, 0, -0.6]), top([0.45, 0, -1.3]), top(AT_SEAT)],
+    [top(AT_ENTRY_TERMINAL), top([1.5, 0, 0.9]), top([1.5, 0, -0.6]), top([0.8, 0, -1.2]), top(AT_SEAT)],
     doorOpen[1] - 0.2,
     { face: -Math.PI / 2 },
   )
@@ -322,7 +324,7 @@ function makeEntryTimeline() {
 
 function makeExitTimeline() {
   // 1. Armchair -> indoor exit terminal
-  const toTerminal = walk([top(AT_SEAT), top([0.9, 0, -1.6]), top(AT_EXIT_TERMINAL)], 0, { face: 0 })
+  const toTerminal = walk([top(AT_SEAT), top([0.9, 0, -1.4]), top(AT_EXIT_TERMINAL)], 0, { face: 0 })
   // 2. Face scan
   const s0 = toTerminal.to + 0.2
   const scan = { terminal: 'exit', from: s0, to: s0 + 2, granted: s0 + 1.4 }
@@ -375,7 +377,8 @@ const TIMELINES = { entry: withThresholds(makeEntryTimeline()), exit: withThresh
 const VIEWS = {
   // From the courtyard air on the stair side: stair landing, entry terminal, door and window
   hallway: { label: 'Hallway', pos: [-5.5, TOP_Y + 3.0, 8.5], target: [0.3, TOP_Y + 1.5, 0.3] },
-  classroom: { label: 'Classroom', pos: [-3.4, TOP_Y + 2.6, -5.5], target: [1.6, TOP_Y + 1.7, -0.3] },
+  // From the front-right corner (above the teacher's desk) toward the door wall and back wall
+  classroom: { label: 'Classroom', pos: [-4.6, TOP_Y + 2.7, -5.2], target: [2.0, TOP_Y + 1.6, -0.8] },
   overview: { label: 'Overview', pos: [30, 22, 34], target: [5, 4.5, -1] },
 }
 // Follow camera sits to the front-left so the left-side stairwell isn't hidden by the building
@@ -655,9 +658,12 @@ function Curtain({ x1, x2, z }) {
   )
 }
 
-/** Room 301's detailed multi-pane window: 3D grille bars + pleated curtains. */
-function WindowWithGrilles() {
-  const { x1, x2, y1, y2 } = WINDOW
+/**
+ * Room 301's detailed multi-pane window: 3D grille bars + pleated curtains.
+ * Built in a wall's local frame: grilles on local +z (outside), curtains on -z (inside).
+ */
+function WindowWithGrilles({ win = WINDOW }) {
+  const { x1, x2, y1, y2 } = win
   const cx = (x1 + x2) / 2
   const w = x2 - x1
   const h = y2 - y1
@@ -724,7 +730,11 @@ function SimpleWindow() {
   )
 }
 
-/** Hallway-facing wall of one classroom: wall, baseboard, door, sign, window. */
+/**
+ * Hallway-facing wall of one classroom: wall, baseboard, door, sign and (for the
+ * other rooms) a hallway window. Room 301's hallway wall (its LEFT side wall from
+ * the students' seats) has only the door; its windows are on the opposite wall.
+ */
 function RoomFront({ number, detailed }) {
   const T = 0.1
   const s = detailed // cast shadows only for the hero room
@@ -733,10 +743,16 @@ function RoomFront({ number, detailed }) {
   )
   return (
     <group>
-      {wall(ROOM.x1, WINDOW.x1, 0, WALL_H)}
-      {wall(WINDOW.x1, WINDOW.x2, 0, WINDOW.y1)}
-      {wall(WINDOW.x1, WINDOW.x2, WINDOW.y2, WALL_H)}
-      {wall(WINDOW.x2, DOOR.x1, 0, WALL_H)}
+      {detailed ? (
+        wall(ROOM.x1, DOOR.x1, 0, WALL_H)
+      ) : (
+        <>
+          {wall(ROOM.x1, WINDOW.x1, 0, WALL_H)}
+          {wall(WINDOW.x1, WINDOW.x2, 0, WINDOW.y1)}
+          {wall(WINDOW.x1, WINDOW.x2, WINDOW.y2, WALL_H)}
+          {wall(WINDOW.x2, DOOR.x1, 0, WALL_H)}
+        </>
+      )}
       {wall(DOOR.x1, DOOR.x2, DOOR.h, WALL_H)}
       {wall(DOOR.x2, ROOM.x2, 0, WALL_H)}
       {/* Dark brown painted lower border, both faces */}
@@ -748,7 +764,45 @@ function RoomFront({ number, detailed }) {
       <Box min={[DOOR.x1 - 0.06, DOOR.h, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
       <Door animated={detailed} shadow={s} />
       <RoomSign text={`B ${number}`} />
-      {detailed ? <WindowWithGrilles /> : <SimpleWindow />}
+      {!detailed && <SimpleWindow />}
+    </group>
+  )
+}
+
+/* Room 301's RIGHT side wall (z = -6, opposite the hallway): two large windows
+   separated by a central pier (room-local x ranges). */
+const SIDE_WINDOWS = [
+  { x1: -5.0, x2: -1.6 },
+  { x1: -0.4, x2: 3.0 },
+]
+
+/** Back-of-building wall of one classroom; for Room 301 this is the window wall. */
+function RoomRear({ detailed }) {
+  const z1 = -ROOM.depth - 0.1
+  const z2 = -ROOM.depth
+  const wall = (x1, x2, y1, y2) => (
+    <Box key={`${x1}-${y1}`} min={[x1, y1, z1]} max={[x2, y2, z2]} color={COLORS.wall} shadow={detailed} />
+  )
+  if (!detailed) return wall(ROOM.x1 - 0.05, ROOM.x2 + 0.05, 0, WALL_H)
+  const { y1, y2 } = WINDOW
+  const [a, b] = SIDE_WINDOWS
+  return (
+    <group>
+      {wall(ROOM.x1 - 0.05, a.x1, 0, WALL_H)}
+      {wall(a.x2, b.x1, 0, WALL_H) /* central pier (wall fan) */}
+      {wall(b.x2, ROOM.x2 + 0.05, 0, WALL_H)}
+      {SIDE_WINDOWS.map((w) => (
+        <group key={w.x1}>
+          {wall(w.x1, w.x2, 0, y1)}
+          {wall(w.x1, w.x2, y2, WALL_H)}
+        </group>
+      ))}
+      {/* Rotated so the grilles face outside (-z) and the yellow curtains face the room */}
+      <group position={[0, 0, (z1 + z2) / 2]} rotation={[0, Math.PI, 0]}>
+        {SIDE_WINDOWS.map((w) => (
+          <WindowWithGrilles key={w.x1} win={{ x1: -w.x2, x2: -w.x1, y1, y2 }} />
+        ))}
+      </group>
     </group>
   )
 }
@@ -811,8 +865,7 @@ function FloorLevel({ level, rooms, label, showLabels }) {
       <TiledFloor x1={x1} x2={x2} z1={D} z2={HALL_Z} />
       <TiledFloor x1={STAIR.x1} x2={x1} z1={level > 0 ? 0.1 : -4.3} z2={HALL_Z} />
 
-      {/* Back wall, end walls and partitions between classrooms */}
-      <Box min={[x1 - 0.05, 0, D - 0.1]} max={[x2 + 0.05, WALL_H, D]} color={COLORS.wall} shadow={false} />
+      {/* End walls and partitions between classrooms (rear walls are per room, below) */}
       {[x1, x1 + ROOM_W, x1 + 2 * ROOM_W, x2].map((px) => (
         <Box key={px} min={[px - 0.05, 0, D]} max={[px + 0.05, WALL_H, -0.1]} color={COLORS.wall} shadow={false} />
       ))}
@@ -821,6 +874,7 @@ function FloorLevel({ level, rooms, label, showLabels }) {
       {rooms.map((n, i) => (
         <group key={n} position={[i * ROOM_W, 0, 0]}>
           <RoomFront number={n} detailed={n === 301} />
+          <RoomRear detailed={n === 301} />
         </group>
       ))}
 
@@ -914,12 +968,15 @@ function Staircase({ showLabels }) {
 /* Room B 301 interior (room-local coordinates)                        */
 /* ------------------------------------------------------------------ */
 
-/** Dark wooden student armchair with a writing tablet on the right; faces -z (front). */
-function Armchair({ x, z }) {
+/**
+ * Dark wooden student armchair with a writing tablet on the student's right.
+ * Faces local -z; rotY = PI/2 turns it to face -x (Room 301's front wall).
+ */
+function Armchair({ x, z, rotY = 0 }) {
   const legs = []
   for (const dx of [-0.18, 0.18]) for (const dz of [-0.18, 0.18]) legs.push([dx, dz])
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, 0, z]} rotation={[0, rotY, 0]}>
       <Block position={[0, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.wood} />
       <Block position={[0, 0.74, 0.2]} size={[0.42, 0.3, 0.03]} color={COLORS.wood} />
       <Block position={[0.25, 0.73, -0.1]} size={[0.24, 0.025, 0.5]} color={COLORS.wood} />
@@ -964,7 +1021,7 @@ function HardHat({ position }) {
   )
 }
 
-/** Safety equipment display on the side wall near the door. */
+/** Safety equipment display centred on Room 301's BACK wall. */
 function SafetyDisplay() {
   const sign = useTextTexture('SAFETY EQUIPMENT', {
     w: 512,
@@ -973,10 +1030,10 @@ function SafetyDisplay() {
     bg: '#15803d',
     fg: '#ffffff',
   })
-  const wx = ROOM.x2 - 0.05 // inner face of the right side wall (partition to Room 302), near the door
+  const wx = ROOM.x2 - 0.05 // inner face of the back wall (partition to Room 302)
   const rows = [0.95, 1.33, 1.71, 2.09] // shelf tops: 4 clean rows
-  const cols = [-2.3, -1.85, -1.4, -0.95]
-  const [z1, z2] = [-2.55, -0.75]
+  const cols = [-3.68, -3.23, -2.78, -2.33]
+  const [z1, z2] = [-3.9, -2.1]
   return (
     <group>
       {/* Wall-mounted rack: two uprights + 4 shelves, each holding 4 orange safety helmets */}
@@ -1077,42 +1134,68 @@ function WallFan({ position, rotY }) {
 }
 
 /**
- * Power extension strip near the base of the equipment wall (inside, left of the door),
- * plugged into a wall outlet, with the cord running up to the network shelf.
+ * Power outlet strip near the base of Room 301's BACK wall (hallway-side corner),
+ * plugged into a wall outlet. Its cord runs along the base to the door wall and
+ * up to the equipment shelf above the door.
  */
 function PowerExtension({ showLabels }) {
-  const z = -0.1 // inner face of the front wall
+  const wx = ROOM.x2 - 0.05 // inner face of the back wall
+  const zc = -1.1 // strip centre (between the helmet rack and the corner)
   return (
     <group>
       {/* Wall outlet plate */}
-      <Block position={[0.25, 0.42, z - 0.006]} size={[0.08, 0.12, 0.012]} color="#f5f5f4" shadow={false} />
-      <Block position={[0.25, 0.42, z - 0.013]} size={[0.03, 0.05, 0.004]} color="#374151" shadow={false} />
-      {/* Extension strip with 4 sockets and a lit switch */}
-      <Block position={[0.72, 0.45, z - 0.03]} size={[0.42, 0.06, 0.06]} color="#fafafa" />
-      {[-0.13, -0.05, 0.03, 0.11].map((dx) => (
-        <Block key={dx} position={[0.72 + dx, 0.45, z - 0.061]} size={[0.045, 0.035, 0.004]} color="#1f2937" shadow={false} />
+      <Block position={[wx - 0.006, 0.42, -1.6]} size={[0.012, 0.12, 0.08]} color="#f5f5f4" shadow={false} />
+      <Block position={[wx - 0.013, 0.42, -1.6]} size={[0.004, 0.05, 0.03]} color="#374151" shadow={false} />
+      {/* Extension strip with 4 sockets and a lit switch, facing into the room (-x) */}
+      <Block position={[wx - 0.03, 0.45, zc]} size={[0.06, 0.06, 0.42]} color="#fafafa" />
+      {[-0.13, -0.05, 0.03, 0.11].map((dz) => (
+        <Block key={dz} position={[wx - 0.061, 0.45, zc + dz]} size={[0.004, 0.035, 0.045]} color="#1f2937" shadow={false} />
       ))}
       <Block
-        position={[0.9, 0.45, z - 0.061]}
-        size={[0.03, 0.025, 0.006]}
+        position={[wx - 0.061, 0.45, zc + 0.18]}
+        size={[0.006, 0.025, 0.03]}
         color="#f97316"
         mat={{ emissive: '#f97316', emissiveIntensity: 1.2 }}
         shadow={false}
       />
-      {/* Cords: outlet -> strip, strip -> shelf */}
-      <Line points={[[0.25, 0.4, z - 0.02], [0.4, 0.38, z - 0.02], [0.5, 0.44, z - 0.03]]} color="#e5e7eb" lineWidth={2} />
-      <Line points={[[0.55, 0.47, z - 0.04], [0.48, 0.6, z - 0.02], [0.48, 2.56, z - 0.02], [0.6, 2.62, z - 0.2]]} color="#9ca3af" lineWidth={2} />
-      <Label show={showLabels} side="classroom" position={[0.72, 0.7, -0.3]}>
-        Power extension
+      {/* Cords: outlet -> strip, strip -> corner -> up the door wall -> shelf */}
+      <Line points={[[wx - 0.02, 0.4, -1.6], [wx - 0.02, 0.38, -1.45], [wx - 0.03, 0.44, -1.32]]} color="#e5e7eb" lineWidth={2} />
+      <Line
+        points={[
+          [wx - 0.04, 0.47, -0.88],
+          [wx - 0.03, 0.35, -0.13],
+          [2.85, 0.35, -0.13],
+          [2.85, 2.56, -0.13],
+          [2.7, 2.62, -0.3],
+        ]}
+        color="#9ca3af"
+        lineWidth={2}
+      />
+      <Label show={showLabels} side="classroom" position={[wx - 0.2, 0.75, zc]}>
+        Power outlet strip
       </Label>
     </group>
   )
 }
 
+/**
+ * Room B 301 four-wall layout (room-local coordinates; students face -x):
+ *   FRONT wall  x = -6 : all boards; teacher's desk centred in front of them
+ *   BACK wall   x = +4 : 4-row safety helmet rack + power outlet strip
+ *   RIGHT wall  z = -6 : the window wall (grilles + yellow curtains, no boards)
+ *   LEFT wall   z =  0 : hallway/door wall: door, exit terminal, equipment shelf
+ */
 function Room301Interior({ showLabels }) {
   const D = -ROOM.depth
-  const cols = [-4.8, -3.7, -2.6, -1.5, -0.4]
-  const rows = [-1.7, -2.6, -3.5, -4.4]
+  const fx = ROOM.x1 + 0.05 // inner face of the front wall
+  const rows = [-3.7, -2.7, -1.7, -0.7, 0.3] // x: front row -> back row
+  const cols = [-5.1, -4.2, -3.3, -2.4] // z: window side -> hallway-side aisle
+  const board = (z1, z2, y1, y2, face, frame = COLORS.aluminum) => (
+    <group>
+      <Box min={[fx, y1, z1]} max={[fx + 0.03, y2, z2]} color={frame} mat={{ metalness: 0.4 }} />
+      <Box min={[fx + 0.03, y1 + 0.05, z1 + 0.05]} max={[fx + 0.045, y2 - 0.05, z2 - 0.05]} color={face} mat={{ roughness: face === '#fafafa' ? 0.2 : 0.95 }} />
+    </group>
+  )
   return (
     <group>
       {/* Lower dark brown border on the inside faces */}
@@ -1120,33 +1203,24 @@ function Room301Interior({ showLabels }) {
       <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
       <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} />
 
-      {/* Front wall (solid, opposite the windows) holds ALL boards:
-          mini-whiteboard | main green chalkboard | whiteboard. The window wall has none. */}
-      <Box min={[-4.5, 0.95, D]} max={[-0.7, 2.35, D + 0.03]} color="#5a3a1e" />
-      <Box min={[-4.4, 1.0, D + 0.03]} max={[-0.8, 2.3, D + 0.05]} color="#1f4d34" mat={{ roughness: 0.95 }} />
-      <Box min={[-4.4, 0.92, D + 0.03]} max={[-0.8, 0.95, D + 0.12]} color="#5a3a1e" />
-      {[
-        { a: -5.6, b: -4.85, y1: 1.3, y2: 2.0 }, // mini-whiteboard
-        { a: -0.3, b: 2.1, y1: 1.0, y2: 2.2 }, // whiteboard
-      ].map(({ a, b, y1, y2 }) => (
-        <group key={a}>
-          <Box min={[a, y1, D]} max={[b, y2, D + 0.03]} color={COLORS.aluminum} mat={{ metalness: 0.6 }} />
-          <Box min={[a + 0.04, y1 + 0.04, D + 0.03]} max={[b - 0.04, y2 - 0.04, D + 0.045]} color="#fafafa" mat={{ roughness: 0.2 }} />
-        </group>
-      ))}
+      {/* FRONT wall: main whiteboard | main green chalkboard | auxiliary mini-whiteboard */}
+      {board(-5.8, -4.4, 1.0, 2.2, '#fafafa')}
+      {board(-4.2, -1.4, 0.95, 2.35, '#1f4d34', '#5a3a1e')}
+      <Box min={[fx, 0.92, -4.2]} max={[fx + 0.1, 0.95, -1.4]} color="#5a3a1e" />
+      {board(-1.15, -0.45, 1.3, 2.0, '#fafafa')}
 
-      {/* Electric wall fans, centred on the middle of each side wall */}
-      <WallFan position={[ROOM.x1 + 0.05, 2.55, D / 2]} rotY={Math.PI / 2} />
-      <WallFan position={[ROOM.x2 - 0.05, 2.55, D / 2]} rotY={-Math.PI / 2} />
+      {/* Teacher's desk centred at the front, facing the students; chair behind it */}
+      <Block position={[-4.9, 0.76, D / 2]} size={[0.7, 0.05, 1.4]} color={COLORS.wood} />
+      <Block position={[-4.72, 0.37, D / 2]} size={[0.3, 0.72, 1.3]} color="#3d2414" />
+      <Block position={[-5.45, 0.45, D / 2]} size={[0.45, 0.05, 0.45]} color={COLORS.woodDark} />
+      <Block position={[-5.67, 0.75, D / 2]} size={[0.04, 0.5, 0.45]} color={COLORS.woodDark} />
 
-      {/* Teacher's desk + chair */}
-      <Block position={[2.4, 0.76, -5.0]} size={[1.4, 0.05, 0.7]} color={COLORS.wood} />
-      <Block position={[2.4, 0.37, -5.12]} size={[1.3, 0.72, 0.4]} color="#3d2414" />
-      <Block position={[2.4, 0.45, -5.6]} size={[0.45, 0.05, 0.45]} color={COLORS.woodDark} />
-      <Block position={[2.4, 0.75, -5.82]} size={[0.45, 0.5, 0.04]} color={COLORS.woodDark} />
+      {/* Student armchairs in rows, all facing the front wall */}
+      {rows.map((x) => cols.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} rotY={Math.PI / 2} />))}
 
-      {/* Student armchairs in rows facing the front */}
-      {cols.map((x) => rows.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} />))}
+      {/* Electric wall fans centred on the two side walls: hallway wall + window-wall pier */}
+      <WallFan position={[(ROOM.x1 + ROOM.x2) / 2, 2.55, -0.1]} rotY={Math.PI} />
+      <WallFan position={[(SIDE_WINDOWS[0].x2 + SIDE_WINDOWS[1].x1) / 2, 2.55, D]} rotY={0} />
 
       {/* Overhead fluorescent fixtures + their light */}
       {[-3.8, -1.0, 1.8].map((x) => [-1.8, -4.2].map((z) => <FluorescentLight key={`${x}${z}`} x={x} z={z} />))}
@@ -1669,7 +1743,7 @@ function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
         <Room301Interior showLabels={showLabels} />
         {/* Fire extinguisher: OUTSIDE on the hallway wall, right next to the doorway */}
         <FireExtinguisher position={[DOOR.x2 + 0.4, 0, 0.1]} />
-        {/* Entry terminal: OUTSIDE on the hallway wall, between the window and the door frame */}
+        {/* Entry terminal: OUTSIDE on the hallway wall, right next to the door frame */}
         <Terminal id="entry" position={[0.6, 1.45, 0.1]} beamLength={0.8} />
         {/* Exit terminal: INSIDE wall, right of the door frame, facing into the room */}
         <Terminal id="exit" position={[2.6, 1.45, -0.1]} rotationY={Math.PI} />
