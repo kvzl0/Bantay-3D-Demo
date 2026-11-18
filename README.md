@@ -2,7 +2,9 @@
 
 Interactive 3D demo for the capstone project **"A Cloud-based Smart Student Monitoring System with Performance Tracking and Alert System for Claro M. Recto High School"**.
 
-It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase beside Room B 301 (Grade 10 Diamond) leads up to the open-air top-floor hallway. The demo animates the full entry/exit flow: the student climbs the stairs, gets a face scan at an indoor Hikvision terminal, the door swings, and the data travels through the network cluster on the shelf inside the room until the parent SMS is sent.
+It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. Green metal grid railings line the hallway.
+
+The Entry terminal (Hikvision) is mounted outside on the hallway wall, between the window and the door. The Exit terminal and the network shelf (Mini PC, DITO ZTE K10, Mercusys AC12G, ESP32 + GSM) are inside the room, around the door.
 
 ### Network topology (all inside Room B 301)
 
@@ -42,7 +44,7 @@ The whole demo lives in [`src/App.jsx`](src/App.jsx) and default-exports `App`. 
 
 ## How to use the demo
 
-- **Simulate Entry** (student starts in the ground-floor courtyard): the student climbs the stairs to the top-floor hallway and walks to Room B 301. The door swings inward, the student steps in to the indoor entry terminal, and the scan turns from blue to green. Pulses then run scanner → Mercusys → Mini PC → cloud, and Mini PC → ESP32 + GSM, which shows the official SMS bubble.
+- **Simulate Entry** (student starts in the ground-floor courtyard): the student climbs the left-side stairs, walks along the top-floor hallway, and scans at the outdoor entry terminal (blue turns green). The door swings inward and the student steps inside. Pulses then run scanner → Mercusys → Mini PC → cloud, and Mini PC → ESP32 + GSM, which shows the official SMS bubble.
 - **Simulate Exit** (student in the room): the student scans at the indoor exit terminal, the door swings outward, and the student walks out to the hallway and back down the stairs. The exit SMS goes out through the same network path.
 - The buttons are enabled based on where the student currently is.
 - Camera presets (Hallway / Classroom / Overview), an **Auto camera** toggle that follows the student, and a label toggle are at the top right. Drag to orbit, scroll to zoom. The roof hides automatically when the camera is above it.

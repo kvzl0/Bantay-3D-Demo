@@ -12,8 +12,11 @@
  *  - x runs along the building, z = 0 is the classroom front wall,
  *    z > 0 is the open-air hallway, z < 0 is inside the classrooms.
  *  - Each story is STORY m tall. Room B 301 is on the top story (y = TOP_Y).
- *  - Room 301 spans x = -6..4. Rooms 302 and 303 continue to the left,
- *    the concrete stairwell sits to the right (x = 4.1..8.4).
+ *  - The concrete stairwell is on the LEFT end of the building (x = -10.4..-6).
+ *    Room 301 (x = -6..4) sits right beside its top landing; 302 and 303
+ *    continue to the right. Floors below repeat the layout (101/201 under 301).
+ *  - Entry terminal: outside on the hallway wall. Exit terminal and the
+ *    network shelf: inside Room 301, around the door.
  *  - Room 301 details, hardware and wires use room-local coordinates and are
  *    rendered inside <group position={[0, TOP_Y, 0]}>. The student and the
  *    cameras use world coordinates.
@@ -59,8 +62,13 @@ const TOP_Y = STORY * 2 // floor level of the top story (rooms 301-303)
 const ROOF_TOP = TOP_Y + STORY
 const ROOM_W = 10
 const ROOM = { x1: -6, x2: 4, depth: 6 } // room 301 footprint (local x)
-const BUILDING = { x1: ROOM.x1 - 2 * ROOM_W, x2: ROOM.x2 } // x = -26..4
-const STAIR = { x1: 4.1, x2: 8.4, mid: 6.35 }
+// Rooms run left -> right: 301 | 302 | 303 (and 101..103, 201..203 below)
+const BUILDING = { x1: ROOM.x1, x2: ROOM.x1 + 3 * ROOM_W } // x = -6..24
+// Concrete switchback stairwell on the LEFT end of the building, right beside Room 301
+const STAIR = { x1: -10.4, x2: ROOM.x1 - 0.05 }
+const FLIGHT_OUT = { x1: STAIR.x1, x2: STAIR.x1 + 2.0, cx: STAIR.x1 + 1.0 } // flight 1 (outer side)
+const FLIGHT_IN = { x1: STAIR.x1 + 2.1, x2: STAIR.x2, cx: (STAIR.x1 + 2.1 + STAIR.x2) / 2 } // flight 2 (beside 301)
+const STAIR_DIVIDER = STAIR.x1 + 2.05
 const HALL_Z = 3.0 // outer edge of the hallway
 const DOOR = { x1: 1.1, x2: 2.1, h: 2.2 } // hinge on the right jamb (x2)
 const WINDOW = { x1: -4.2, x2: -0.2, y1: 1.0, y2: 2.6 }
@@ -126,32 +134,33 @@ function walk(points, from, { face, speed = WALK_SPEED } = {}) {
 /* Student routes (world coordinates)                                  */
 /* ------------------------------------------------------------------ */
 
-const COURTYARD_START = [10.5, 0, 6.5]
-const COURTYARD_ROT = [0, -2.6, 0]
+const COURTYARD_START = [-13.5, 0, 6.5]
+const COURTYARD_ROT = [0, 2.5, 0]
 
-/** Ground floor -> top floor via the switchback concrete staircase. */
+/** Ground floor -> top floor via the left-side switchback concrete staircase. */
 function stairClimbPoints() {
+  const out = FLIGHT_OUT.cx
+  const inn = FLIGHT_IN.cx
   const pts = []
   for (const f of [0, STORY]) {
     const m = f + STORY / 2
     pts.push(
-      [7.4, f, 0.6],
-      [7.4, f, 0.1],
-      [7.4, m, -2.7], // top of flight 1
-      [7.4, m, -3.45], // mid landing
-      [5.25, m, -3.45],
-      [5.25, m, -2.7],
-      [5.25, f + STORY, 0.1], // top of flight 2
-      [5.25, f + STORY, 0.6],
+      [out, f, 0.6],
+      [out, f, 0.1],
+      [out, m, -2.7], // top of flight 1
+      [out, m, -3.45], // mid landing
+      [inn, m, -3.45],
+      [inn, m, -2.7],
+      [inn, f + STORY, 0.1], // top of flight 2
+      [inn, f + STORY, 0.6],
     )
   }
   return pts
 }
 
-/* Room-local points inside / in front of Room 301 */
-const AT_DOOR_OUTSIDE = [1.5, 0, 0.9]
-const AT_ENTRY_TERMINAL = [0.7, 0, -0.9] // faces the indoor entry terminal
-const AT_EXIT_TERMINAL = [2.6, 0, -0.9] // faces the indoor exit terminal
+/* Room-local points in front of / inside Room 301 */
+const AT_ENTRY_TERMINAL = [0.6, 0, 1.0] // hallway side, facing the outdoor entry terminal
+const AT_EXIT_TERMINAL = [2.6, 0, -0.9] // inside, facing the indoor exit terminal
 const AT_SEAT = [0.45, 0, -2.6] // aisle beside the student's armchair
 
 /* ------------------------------------------------------------------ */
@@ -168,7 +177,7 @@ const AT_SEAT = [0.45, 0, -2.6] // aisle beside the student's armchair
  * Shelf order, left to right: DITO, Mini PC, Mercusys, ESP32 + GSM.
  */
 const DEVICES = {
-  dito: [0.62, SHELF_Y + 0.16, -0.28],
+  dito: [0.68, SHELF_Y + 0.07, -0.28], // centre of the pill-shaped base
   miniPc: [1.1, SHELF_Y + 0.05, -0.28],
   mercusys: [1.68, SHELF_Y + 0.025, -0.28],
   esp: [2.38, SHELF_Y + 0.015, -0.3],
@@ -177,10 +186,12 @@ const DEVICES = {
 }
 
 const WIRES = {
-  // Indoor entry terminal (left of the door) -> along the wall under the shelf -> Mercusys LAN port
+  // Outdoor entry terminal (hallway wall, between window and door) -> up the wall,
+  // through the wall into the room, under the shelf -> Mercusys LAN port
   entryWire: buildPath([
-    [0.7, 1.62, -0.13],
-    [0.7, 2.5, -0.12],
+    [0.6, 1.62, 0.13],
+    [0.6, 2.5, 0.13],
+    [0.6, 2.5, -0.12],
     [1.6, 2.5, -0.12],
     [1.6, 2.645, -0.13],
     [1.6, 2.66, -0.16],
@@ -202,9 +213,9 @@ const WIRES = {
   ]),
   // DITO ZTE K10 -> Mini PC (cellular internet access)
   ditoLink: buildPath([
-    [0.71, 2.7, -0.2],
-    [0.83, 2.69, -0.2],
-    [0.96, 2.68, -0.2],
+    [0.86, 2.68, -0.24],
+    [0.91, 2.675, -0.22],
+    [0.96, 2.67, -0.22],
   ]),
   // Mini PC -> cloud database (drawn dashed, up through the roof)
   uplink: buildPath([
@@ -225,83 +236,87 @@ const WIRES = {
 /* ------------------------------------------------------------------ */
 
 /**
- * Pulses, device hits and the SMS window relative to scan approval G:
- * scanner -> Mercusys -> Mini PC, then Mini PC -> cloud (internet via DITO)
- * and Mini PC -> ESP32 + GSM at the same time.
+ * Pulses, device hits and the SMS window, starting at T0:
+ * scanner -> Mercusys (LAN) -> Mini PC, then at the same time
+ * Mini PC -> cloud (internet supplied by DITO) and Mini PC -> ESP32 + GSM.
  */
-function dataFlow(G, terminalWire) {
+function dataFlow(T0, terminalWire) {
   return {
     pulses: [
-      { wire: terminalWire, from: G + 0.3, to: G + 1.2, color: COLORS.lan },
-      { wire: 'lan', from: G + 1.3, to: G + 1.8, color: COLORS.lan },
-      { wire: 'ditoLink', from: G + 2.0, to: G + 2.3, color: COLORS.cloud },
-      { wire: 'uplink', from: G + 2.0, to: G + 2.8, color: COLORS.cloud },
-      { wire: 'espWire', from: G + 2.0, to: G + 2.8, color: COLORS.sms },
+      { wire: terminalWire, from: T0, to: T0 + 0.9, color: COLORS.lan },
+      { wire: 'lan', from: T0 + 1.0, to: T0 + 1.5, color: COLORS.lan },
+      { wire: 'ditoLink', from: T0 + 1.7, to: T0 + 2.0, color: COLORS.cloud },
+      { wire: 'uplink', from: T0 + 1.7, to: T0 + 2.5, color: COLORS.cloud },
+      { wire: 'espWire', from: T0 + 1.7, to: T0 + 2.5, color: COLORS.sms },
     ],
-    hits: { mercusys: G + 1.2, miniPc: G + 1.8, dito: G + 2.0, esp: G + 2.8, cloud: G + 2.8 },
-    sms: [G + 2.8, G + 7.8],
+    hits: { mercusys: T0 + 0.9, miniPc: T0 + 1.5, dito: T0 + 1.7, esp: T0 + 2.5, cloud: T0 + 2.5 },
+    sms: [T0 + 2.5, T0 + 7.5],
   }
 }
 
-/** Dashboard log entries shared by both flows (text differs per flow). */
-function dataLogs(G, kind) {
+/** Dashboard log entries: face match at G, network steps relative to T0. */
+function dataLogs(G, T0, kind) {
   const entry = kind === 'entry'
   return [
-    { at: G, icon: '✓', text: `Face verified at indoor ${kind} terminal (Hikvision).` },
-    { at: G + 1.2, icon: '⇄', text: 'Scan data received by Mercusys AC12G (local LAN).' },
-    { at: G + 2.0, icon: '✓', text: 'Local processing via Mini PC complete.' },
+    {
+      at: G,
+      icon: '✓',
+      text: entry ? 'Face verified at hallway entry terminal (Hikvision).' : 'Face verified at indoor exit terminal (Hikvision).',
+    },
+    { at: T0 + 0.9, icon: '⇄', text: 'Scan data received by Mercusys AC12G (local LAN switch).' },
+    { at: T0 + 1.7, icon: '✓', text: 'Local processing via Mini PC complete.' },
     entry
-      ? { at: G + 3.0, icon: '✉', sms: true, text: 'Alert 1: SMS Alert dispatched to parent via ESP32 & GSM Module (DITO Network).' }
-      : { at: G + 3.0, icon: '✉', sms: true, text: 'Alert: SMS Exit Alert dispatched to parent via ESP32 & GSM Module.' },
+      ? { at: T0 + 2.7, icon: '✉', sms: true, text: 'Alert 1: SMS Alert dispatched to parent via ESP32 & GSM Module (DITO Network).' }
+      : { at: T0 + 2.7, icon: '✉', sms: true, text: 'Alert: SMS Exit Alert dispatched to parent via ESP32 & GSM Module.' },
     entry
-      ? { at: G + 3.2, icon: '☁', text: 'Alert 2: Section attendance logged in cloud database.' }
-      : { at: G + 3.2, icon: '☁', text: 'Cloud log updated with exit time.' },
+      ? { at: T0 + 2.9, icon: '☁', text: 'Alert 2: Section attendance logged in cloud database.' }
+      : { at: T0 + 2.9, icon: '☁', text: 'Cloud log updated with exit time.' },
   ]
 }
 
 function makeEntryTimeline() {
-  // 1. Courtyard -> up both staircases -> top hallway -> in front of Room B 301
+  // 1. Courtyard -> up the left-side stairs -> top hallway -> outdoor entry terminal
   const climb = stairClimbPoints()
   const approach = walk(
-    [COURTYARD_START, ...climb, top([5.25, 0, 1.5]), top([1.5, 0, 1.5]), top(AT_DOOR_OUTSIDE)],
+    [COURTYARD_START, ...climb, top([FLIGHT_IN.cx, 0, 1.5]), top([AT_ENTRY_TERMINAL[0], 0, 1.5]), top(AT_ENTRY_TERMINAL)],
     0,
     { face: Math.PI },
   )
-  const reachedTopHall = approach.timeAt(climb.length) // first point on the top hallway
-  // 2. Door swings inward, 3. student steps inside to the indoor entry terminal
-  const doorOpen = [approach.to + 0.2, approach.to + 1.2]
-  const stepIn = walk([top(AT_DOOR_OUTSIDE), top([1.5, 0, -0.6]), top(AT_ENTRY_TERMINAL)], approach.to + 1.0, {
-    face: 0,
-  })
-  // 4. Face scan
-  const s0 = stepIn.to + 0.2
+  const reachedTopHall = approach.timeAt(climb.length) // top-floor stair landing
+  // 2. Face scan at the hallway terminal
+  const s0 = approach.to + 0.2
   const scan = { terminal: 'entry', from: s0, to: s0 + 2, granted: s0 + 1.4 }
   const G = scan.granted
-  // 5. Walk to the armchair while data flows
-  const toSeat = walk([top(AT_ENTRY_TERMINAL), top([0.45, 0, -1.3]), top(AT_SEAT)], scan.to + 0.2, {
-    face: -Math.PI / 2,
-  })
-  const flow = dataFlow(G, 'entryWire')
+  // 3. Door swings inward, 4. student steps inside and walks to the armchair
+  const doorOpen = [G + 0.2, G + 1.2]
+  const stepIn = walk(
+    [top(AT_ENTRY_TERMINAL), top([1.5, 0, 0.9]), top([1.5, 0, -0.6]), top([0.45, 0, -1.3]), top(AT_SEAT)],
+    doorOpen[1] - 0.2,
+    { face: -Math.PI / 2 },
+  )
+  const inside = stepIn.timeAt(2)
+  // 5. Data pulses through the indoor network cluster once the student is inside
+  const T0 = inside
+  const flow = dataFlow(T0, 'entryWire')
   return {
     endLocation: 'classroom',
-    duration: Math.max(toSeat.to, flow.sms[1]) + 0.4,
-    walks: [approach, stepIn, toSeat],
-    door: { angle: -1.35, open: doorOpen, close: [s0, s0 + 1] }, // negative = swings inward
+    duration: Math.max(stepIn.to, flow.sms[1]) + 0.4,
+    walks: [approach, stepIn],
+    door: { angle: -1.35, open: doorOpen, close: [inside + 0.6, inside + 1.6] }, // negative = swings inward
     scan,
     ...flow,
     cameras: [
       { at: 0, view: 'follow' },
       { at: reachedTopHall + 0.5, view: 'hallway' },
-      { at: doorOpen[0] + 0.6, view: 'classroom' },
+      { at: inside - 0.4, view: 'classroom' },
     ],
     status: [
-      { at: 0, text: 'Walking up to the top floor…', tone: 'idle' },
-      { at: reachedTopHall, text: 'Approaching Room B 301…', tone: 'idle' },
-      { at: stepIn.from, text: 'Stepping in to entry terminal…', tone: 'idle' },
+      { at: 0, text: 'Walking up the left-side stairs…', tone: 'idle' },
+      { at: reachedTopHall, text: 'Approaching hallway entry terminal…', tone: 'idle' },
       { at: scan.from, text: 'Scanning face…', tone: 'scan' },
       { at: G, text: 'Room Access Granted', tone: 'ok' },
     ],
-    logs: dataLogs(G, 'entry'),
+    logs: dataLogs(G, T0, 'entry'),
   }
 }
 
@@ -319,14 +334,15 @@ function makeExitTimeline() {
       top(AT_EXIT_TERMINAL),
       top([1.5, 0, -0.75]),
       top([1.5, 0, 1.5]), // index 2: outside, clear of the door leaf
-      top([5.25, 0, 1.5]),
+      top([FLIGHT_IN.cx, 0, 1.5]), // west along the hallway to the stair landing
       ...stairClimbPoints().reverse(),
       COURTYARD_START,
     ],
     scan.to + 0.4,
   )
   const outside = out.timeAt(2)
-  const flow = dataFlow(G, 'exitWire')
+  const T0 = G + 0.3
+  const flow = dataFlow(T0, 'exitWire')
   return {
     endLocation: 'courtyard',
     duration: Math.max(out.to, flow.sms[1]) + 0.4,
@@ -344,7 +360,7 @@ function makeExitTimeline() {
       { at: scan.from, text: 'Scanning face…', tone: 'scan' },
       { at: G, text: 'Exit Logged', tone: 'ok' },
     ],
-    logs: dataLogs(G, 'exit'),
+    logs: dataLogs(G, T0, 'exit'),
   }
 }
 
@@ -357,11 +373,13 @@ const TIMELINES = { entry: withThresholds(makeEntryTimeline()), exit: withThresh
 
 /** Camera presets (world coordinates). `follow` tracks the student. */
 const VIEWS = {
-  hallway: { label: 'Hallway', pos: [8.5, TOP_Y + 3.0, 9], target: [0, TOP_Y + 1.5, 0.3] },
+  // From the courtyard air on the stair side: stair landing, entry terminal, door and window
+  hallway: { label: 'Hallway', pos: [-5.5, TOP_Y + 3.0, 8.5], target: [0.3, TOP_Y + 1.5, 0.3] },
   classroom: { label: 'Classroom', pos: [-3.4, TOP_Y + 2.6, -5.5], target: [1.6, TOP_Y + 1.7, -0.3] },
-  overview: { label: 'Overview', pos: [16, 22, 34], target: [-10, 4.5, -1] },
+  overview: { label: 'Overview', pos: [30, 22, 34], target: [5, 4.5, -1] },
 }
-const FOLLOW_OFFSET = new THREE.Vector3(4.5, 3.0, 6.5)
+// Follow camera sits to the front-left so the left-side stairwell isn't hidden by the building
+const FOLLOW_OFFSET = new THREE.Vector3(-4.5, 3.0, 6.5)
 
 /* ------------------------------------------------------------------ */
 /* Shared simulation clock                                             */
@@ -545,12 +563,12 @@ function GridPanel({ position, width, height, color, cell, rotY = 0 }) {
 function Courtyard() {
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-8, -0.02, 10]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[6, -0.02, 10]} receiveShadow>
         <planeGeometry args={[90, 60]} />
         <meshStandardMaterial color="#c9c3b3" roughness={0.95} />
       </mesh>
       {/* Garden plot in the courtyard */}
-      <Box min={[-20, -0.02, 6]} max={[-4, 0.12, 12]} color="#7a9a5a" />
+      <Box min={[0, -0.02, 6]} max={[16, 0.12, 12]} color="#7a9a5a" />
     </group>
   )
 }
@@ -735,10 +753,11 @@ function RoomFront({ number, detailed }) {
   )
 }
 
+/** Green metal grid railing ("harang") from the left stair landing past every classroom. */
 function HallwayRailing() {
   const z = HALL_Z - 0.06
-  const x1 = BUILDING.x1
-  const x2 = STAIR.x2
+  const x1 = STAIR.x1
+  const x2 = BUILDING.x2
   const posts = []
   for (let x = x1; x <= x2 + 0.01; x += 2) posts.push(x)
   const metal = { metalness: 0.5, roughness: 0.4 }
@@ -762,31 +781,29 @@ function FloorLevel({ level, rooms, label, showLabels }) {
     <group position={[0, y, 0]}>
       {level > 0 && (
         <>
-          {/* Concrete floor slab (room + hallway) and the stair landing */}
-          <Box min={[x1 - 0.1, -0.2, D - 0.1]} max={[STAIR.x1, 0, HALL_Z]} color={COLORS.slab} />
+          {/* Concrete floor slab (rooms + hallway) and the left stair landing */}
+          <Box min={[x1 - 0.05, -0.2, D - 0.1]} max={[x2 + 0.05, 0, HALL_Z]} color={COLORS.slab} />
           <Box min={[STAIR.x1, -0.2, 0.1]} max={[STAIR.x2, 0, HALL_Z]} color={COLORS.slab} />
         </>
       )}
-      <TiledFloor x1={x1} x2={STAIR.x1} z1={D} z2={HALL_Z} />
-      <TiledFloor x1={STAIR.x1} x2={STAIR.x2} z1={level > 0 ? 0.1 : -4.3} z2={HALL_Z} />
+      <TiledFloor x1={x1} x2={x2} z1={D} z2={HALL_Z} />
+      <TiledFloor x1={STAIR.x1} x2={x1} z1={level > 0 ? 0.1 : -4.3} z2={HALL_Z} />
 
       {/* Back wall, end walls and partitions between classrooms */}
-      <Box min={[x1 - 0.1, 0, D - 0.1]} max={[x2 + 0.1, WALL_H, D]} color={COLORS.wall} shadow={false} />
-      <Box min={[x1 - 0.1, 0, D]} max={[x1, WALL_H, 0.1]} color={COLORS.wall} />
-      <Box min={[x2 - 0.1, 0, D]} max={[x2 + 0.1, WALL_H, 0.1]} color={COLORS.wall} />
-      {[x1 + ROOM_W, x1 + 2 * ROOM_W].map((px) => (
+      <Box min={[x1 - 0.05, 0, D - 0.1]} max={[x2 + 0.05, WALL_H, D]} color={COLORS.wall} shadow={false} />
+      {[x1, x1 + ROOM_W, x1 + 2 * ROOM_W, x2].map((px) => (
         <Box key={px} min={[px - 0.05, 0, D]} max={[px + 0.05, WALL_H, -0.1]} color={COLORS.wall} shadow={false} />
       ))}
 
-      {/* Room fronts: 301 sits at room-local x; 302/303 (etc.) step 10 m to the left */}
+      {/* Room fronts left -> right: x01 next to the stairs, then x02, x03 (10 m apart) */}
       {rooms.map((n, i) => (
-        <group key={n} position={[-i * ROOM_W, 0, 0]}>
+        <group key={n} position={[i * ROOM_W, 0, 0]}>
           <RoomFront number={n} detailed={n === 301} />
         </group>
       ))}
 
       <HallwayRailing />
-      <Label show={showLabels} position={[x1 - 1.4, 1.6, 1.5]} tone="light" size="text-[13px]">
+      <Label show={showLabels} position={[x2 + 1.8, 1.6, 1.5]} tone="light" size="text-[13px]">
         {label} · Rooms {rooms[0]}–{rooms[rooms.length - 1]}
       </Label>
     </group>
@@ -802,8 +819,8 @@ function Roof() {
   return (
     <group ref={ref}>
       <Box
-        min={[BUILDING.x1 - 0.2, ROOF_TOP - 0.2, -ROOM.depth - 0.2]}
-        max={[STAIR.x2 + 0.1, ROOF_TOP, HALL_Z + 0.1]}
+        min={[STAIR.x1 - 0.1, ROOF_TOP - 0.2, -ROOM.depth - 0.2]}
+        max={[BUILDING.x2 + 0.2, ROOF_TOP, HALL_Z + 0.1]}
         color="#b9b3a5"
         shadow={false}
       />
@@ -812,7 +829,7 @@ function Roof() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Concrete switchback staircase (beside Room 301)                     */
+/* Concrete switchback staircase (left end, beside Room 301)           */
 /* ------------------------------------------------------------------ */
 
 const STEPS = 10
@@ -821,11 +838,11 @@ const TREAD = 2.8 / STEPS
 const SLOPE = Math.atan2(STORY / 2, 2.8)
 
 function Flight({ base, up }) {
-  // up = true: flight 1 (x 6.4..8.4) climbs toward -z; false: flight 2 (x 4.1..6.3) climbs toward +z
+  // up = true: flight 1 (outer side) climbs toward -z; false: flight 2 (beside Room 301) climbs toward +z
   return Array.from({ length: STEPS }, (_, i) => {
     const t = base + (i + 0.5) * RISE
     const [z1, z2] = up ? [0.1 - (i + 1) * TREAD, 0.1 - i * TREAD] : [-2.7 + i * TREAD, -2.7 + (i + 1) * TREAD]
-    const [x1, x2] = up ? [6.4, STAIR.x2] : [STAIR.x1, 6.3]
+    const [x1, x2] = up ? [FLIGHT_OUT.x1, FLIGHT_OUT.x2] : [FLIGHT_IN.x1, FLIGHT_IN.x2]
     return <Box key={i} min={[x1, t - 0.3, z1]} max={[x2, t, z2]} color={i % 2 ? COLORS.concrete : COLORS.concreteLight} />
   })
 }
@@ -841,7 +858,7 @@ function Staircase({ showLabels }) {
             <Box min={[STAIR.x1, mid - 0.2, -4.3]} max={[STAIR.x2, mid, -2.7]} color={COLORS.concrete} />
             <Flight base={mid} up={false} />
             {/* Concrete parapets: outer edge + divider along flight 1, mid-landing edge */}
-            {[STAIR.x2 - 0.05, STAIR.mid].map((x) => (
+            {[STAIR.x1 + 0.05, STAIR_DIVIDER].map((x) => (
               <Block
                 key={x}
                 position={[x, f + STORY / 4 + 0.45, -1.3]}
@@ -850,7 +867,7 @@ function Staircase({ showLabels }) {
                 color={COLORS.concrete}
               />
             ))}
-            <Box min={[STAIR.x2 - 0.1, mid, -4.3]} max={[STAIR.x2, mid + 0.9, -2.7]} color={COLORS.concrete} />
+            <Box min={[STAIR.x1, mid, -4.3]} max={[STAIR.x1 + 0.1, mid + 0.9, -2.7]} color={COLORS.concrete} />
           </group>
         )
       })}
@@ -861,7 +878,7 @@ function Staircase({ showLabels }) {
       {[STORY, TOP_Y].map((y) => (
         <GridPanel
           key={y}
-          position={[STAIR.x2 - 0.04, y + 0.55, (0.1 + HALL_Z) / 2]}
+          position={[STAIR.x1 + 0.04, y + 0.55, (0.1 + HALL_Z) / 2]}
           width={HALL_Z - 0.1}
           height={0.86}
           color={COLORS.railing}
@@ -869,7 +886,7 @@ function Staircase({ showLabels }) {
           rotY={Math.PI / 2}
         />
       ))}
-      <Label show={showLabels} side="hallway" position={[7.4, TOP_Y + 2.4, 1.6]}>
+      <Label show={showLabels} side="hallway" position={[(STAIR.x1 + STAIR.x2) / 2, TOP_Y + 2.4, 1.6]}>
         Stair landing · Top floor
       </Label>
     </group>
@@ -939,7 +956,7 @@ function SafetyDisplay() {
     bg: '#15803d',
     fg: '#ffffff',
   })
-  const wx = ROOM.x2 - 0.1 // inner face of the side wall
+  const wx = ROOM.x2 - 0.05 // inner face of the right side wall (partition to Room 302), near the door
   return (
     <group>
       {/* Wall rack with orange hard hats */}
@@ -971,9 +988,9 @@ function Room301Interior() {
   return (
     <group>
       {/* Lower dark brown border on the inside faces */}
-      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x2 - 0.1, 0.3, D + 0.04]} color={COLORS.baseboard} />
+      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x2 - 0.05, 0.3, D + 0.04]} color={COLORS.baseboard} />
       <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
-      <Box min={[ROOM.x2 - 0.14, 0, D]} max={[ROOM.x2 - 0.1, 0.3, -0.1]} color={COLORS.baseboard} />
+      <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} />
 
       {/* Front of the room: green chalkboard flanked by whiteboards */}
       <Box min={[-4.5, 0.95, D]} max={[-0.7, 2.35, D + 0.03]} color="#5a3a1e" />
@@ -1101,6 +1118,46 @@ function Led({ position, color, hit, size = 0.015 }) {
   )
 }
 
+/**
+ * DITO ZTE K10: a white capsule ("pill") base lying on the shelf, two thick
+ * vertical paddle antennas, and a dark status strip with red "DITO" branding.
+ * Local -z faces into the classroom.
+ */
+function DitoRouter() {
+  const R = 0.07 // base radius
+  const brand = useTextTexture('DITO', {
+    w: 160,
+    h: 48,
+    font: 'bold 40px Arial, Helvetica, sans-serif',
+    bg: '#111827',
+    fg: '#ef1c24',
+  })
+  const white = { color: '#f8f8f6', roughness: 0.35 }
+  return (
+    <group position={DEVICES.dito}>
+      {/* Pill-shaped base: capsule lying along x */}
+      <mesh rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
+        <capsuleGeometry args={[R, 0.2, 8, 24]} />
+        <meshStandardMaterial {...white} />
+      </mesh>
+      {/* Two thick vertical paddle antennas (flattened capsules) */}
+      {[-0.1, 0.1].map((x) => (
+        <mesh key={x} position={[x, R + 0.11, 0.02]} scale={[1, 1, 0.45]} castShadow>
+          <capsuleGeometry args={[0.035, 0.16, 6, 16]} />
+          <meshStandardMaterial {...white} />
+        </mesh>
+      ))}
+      {/* Dark central status / indicator strip with red DITO branding */}
+      <Block position={[0, 0, -R - 0.004]} size={[0.17, 0.045, 0.01]} color="#111827" shadow={false} />
+      <mesh position={[-0.015, 0, -R - 0.0095]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[0.09, 0.027]} />
+        <meshBasicMaterial map={brand} toneMapped={false} />
+      </mesh>
+      <Led position={[0.06, 0, -R - 0.01]} color="#22c55e" hit="dito" size={0.01} />
+    </group>
+  )
+}
+
 function NetworkShelf({ showLabels }) {
   const front = -0.415 // z of the device faces (facing into the room)
   return (
@@ -1111,10 +1168,8 @@ function NetworkShelf({ showLabels }) {
         <Box key={x} min={[x - 0.015, SHELF_Y - 0.2, -0.4]} max={[x + 0.015, SHELF_Y - 0.04, -0.1]} color={COLORS.metal} />
       ))}
 
-      {/* DITO ZTE K10 home router: cellular internet for the Mini PC (white unit, red accent) */}
-      <Block position={DEVICES.dito} size={[0.18, 0.32, 0.18]} color="#f5f5f4" mat={{ roughness: 0.4 }} />
-      <Block position={[DEVICES.dito[0], SHELF_Y + 0.25, -0.372]} size={[0.12, 0.03, 0.005]} color="#dc2626" shadow={false} />
-      <Led position={[DEVICES.dito[0], SHELF_Y + 0.12, -0.373]} color="#ef4444" hit="dito" />
+      {/* DITO ZTE K10 home router: cellular internet for the Mini PC */}
+      <DitoRouter />
 
       {/* Mini PC: central node, linked to the cloud database */}
       <Block position={DEVICES.miniPc} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
@@ -1478,10 +1533,11 @@ function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
       {/* Room B 301 interior + all hardware (room-local coordinates) */}
       <group position={[0, TOP_Y, 0]}>
         <Room301Interior />
-        {/* Indoor entry terminal: left of the door frame. Indoor exit terminal: right of it. */}
-        <Terminal id="entry" position={[0.7, 1.45, -0.1]} rotationY={Math.PI} />
+        {/* Entry terminal: OUTSIDE on the hallway wall, between the window and the door frame */}
+        <Terminal id="entry" position={[0.6, 1.45, 0.1]} beamLength={0.8} />
+        {/* Exit terminal: INSIDE wall, right of the door frame, facing into the room */}
         <Terminal id="exit" position={[2.6, 1.45, -0.1]} rotationY={Math.PI} />
-        <Label show={showLabels} side="classroom" position={[0.55, 1.8, -0.3]}>Entry Terminal (Hikvision)</Label>
+        <Label show={showLabels} side="hallway" position={[0.45, 1.8, 0.3]}>Entry Terminal (Hikvision)</Label>
         <Label show={showLabels} side="classroom" position={[2.75, 1.8, -0.3]}>Exit Terminal (Hikvision)</Label>
         <NetworkShelf showLabels={showLabels} />
         <Wires />
