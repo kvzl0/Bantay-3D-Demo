@@ -15,7 +15,7 @@ Room B 301 (front wall next to the stairs, back wall next to Room 302), as seen 
 | Right side | Two windows with white wavy grilles and yellow curtains; a wall fan on the pier between them |
 | Left side (hallway) | Emergency front door, 3 curtained windows, Exit terminal beside the rear door, rear door, device shelf above it (DITO ZTE K10, Mercusys AC12G, ESP32 + GSM) |
 
-Outside on the hallway wall, the Hikvision Entry terminal sits in the same spot as the Exit terminal, beside the rear door. The red fire extinguisher hangs beside the front door. Inside, 60 armchairs face the front in 6 rows of 5 + 5 with a centre aisle. Wall fans, ceiling orbit fans and fluorescent fixtures complete the room.
+Outside on the hallway wall, the Hikvision Entry terminal sits in the same spot as the Exit terminal, beside the rear door. The red fire extinguisher hangs beside the front door. Inside, 60 armchairs face the front in 6 rows of 5 + 5 with a centre aisle. Wall fans, one ceiling orbit fan in the middle of the room and fluorescent fixtures complete the room.
 
 ### Network topology (all inside Room B 301; cables run along the walls between the rear-door shelf and the Mini PC shelf)
 
