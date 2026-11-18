@@ -2,20 +2,22 @@
 
 Interactive 3D demo for the capstone project **"A Cloud-based Smart Student Monitoring System with Performance Tracking and Alert System for Claro M. Recto High School"**.
 
-It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. On every floor, the hallway's open side is a solid waist-level wall, painted pale yellow with a dark brown lower border, with green metal grid grilles mounted on top. A red fire extinguisher hangs on the hallway wall beside Room B 301's door.
+It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. On every floor, the hallway's open side is a solid waist-level wall, painted pale yellow with a dark brown lower border, with green metal grid grilles mounted on top.
 
-Room B 301's walls, as seen by a seated student facing the front:
+Every classroom's hallway wall has an emergency front door, three curtained windows with grilles, and the rear door. Students use only the rear door to enter and leave.
+
+Room B 301 (front wall next to the stairs, back wall next to Room 302), as seen by a seated student facing the front:
 
 | Wall | Contents |
 | --- | --- |
-| Front | Main green chalkboard, main whiteboard, mini-whiteboard; teacher's desk centred in front of them |
-| Back | 4-row rack of orange safety helmets; power outlet strip near the base |
-| Right side | Windows with metal security grilles and yellow curtains (no boards); a wall fan on the pier between them |
-| Left side (hallway/door wall) | Door, Exit terminal beside the door frame, equipment shelf above the door, a wall fan |
+| Front | Mini-whiteboard, green chalkboard with a TV, whiteboard, posters; one teacher's table centred in front of the boards |
+| Back | Vision board; power outlet strip in the middle with a wall fan above; 4 × 8 orange helmet rack beside the rear door, with the Mini PC shelf above it |
+| Right side | Two windows with white wavy grilles and yellow curtains; a wall fan on the pier between them |
+| Left side (hallway) | Emergency front door, 3 curtained windows, Exit terminal beside the rear door, rear door, device shelf above it (DITO ZTE K10, Mercusys AC12G, ESP32 + GSM) |
 
-The Hikvision Entry terminal and the red fire extinguisher are mounted outside on the hallway wall, next to the doorway. The shelf above the door holds the Mini PC, DITO ZTE K10, Mercusys AC12G and ESP32 + GSM.
+Outside on the hallway wall, the Hikvision Entry terminal sits in the same spot as the Exit terminal, beside the rear door. The red fire extinguisher hangs beside the front door. Inside, 60 armchairs face the front in 6 rows of 5 + 5 with a centre aisle. Wall fans, ceiling orbit fans and fluorescent fixtures complete the room.
 
-### Network topology (all inside Room B 301)
+### Network topology (all inside Room B 301; cables run along the walls between the rear-door shelf and the Mini PC shelf)
 
 | From | To | Purpose |
 | --- | --- | --- |
