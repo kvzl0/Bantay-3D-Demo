@@ -3,9 +3,20 @@
  * A Cloud-based Smart Student Monitoring System with Performance Tracking
  * and Alert System for Claro M. Recto High School.
  *
- * Single-file interactive 3D demo of the Room B 301 entry/exit process and
- * the local network / SMS data flow. Built only with React Three Fiber + drei
- * primitives (no GLTF/GLB models). All animation is driven by useFrame.
+ * Single-file interactive 3D demo of the 3-story school building, the
+ * Room B 301 entry/exit process, and the local network / SMS data flow.
+ * Built only with React Three Fiber + drei primitives (no GLTF/GLB models).
+ * All animation is driven by useFrame.
+ *
+ * Coordinate notes
+ *  - x runs along the building, z = 0 is the classroom front wall,
+ *    z > 0 is the open-air hallway, z < 0 is inside the classrooms.
+ *  - Each story is STORY m tall. Room B 301 is on the top story (y = TOP_Y).
+ *  - Room 301 spans x = -6..4. Rooms 302 and 303 continue to the left,
+ *    the concrete stairwell sits to the right (x = 4.1..8.4).
+ *  - Room 301 details, hardware and wires use room-local coordinates and are
+ *    rendered inside <group position={[0, TOP_Y, 0]}>. The student and the
+ *    cameras use world coordinates.
  *
  * Author: Kiev Gonzales (kvzl0)
  */
@@ -27,9 +38,14 @@ const COLORS = {
   doorInset: '#5c3519',
   frame: '#3a210f',
   wood: '#4b2e1a',
+  woodDark: '#2e1b0f',
   metal: '#3f4650',
   aluminum: '#a3a9b1',
   curtain: '#f5d142',
+  railing: '#2f7d4a',
+  concrete: '#cfc8b6',
+  concreteLight: '#ddd6c4',
+  slab: '#d9d2bf',
   scanBlue: '#3b82f6',
   scanGreen: '#22c55e',
   lan: '#38bdf8',
@@ -37,25 +53,46 @@ const COLORS = {
   sms: '#f59e0b',
 }
 
-const WALL_H = 3.2
-const DOOR = { x1: 1.1, x2: 2.1, h: 2.2 }
+const STORY = 3.4 // floor-to-floor height
+const WALL_H = 3.2 // clear wall height (slab is 0.2)
+const TOP_Y = STORY * 2 // floor level of the top story (rooms 301-303)
+const ROOF_TOP = TOP_Y + STORY
+const ROOM_W = 10
+const ROOM = { x1: -6, x2: 4, depth: 6 } // room 301 footprint (local x)
+const BUILDING = { x1: ROOM.x1 - 2 * ROOM_W, x2: ROOM.x2 } // x = -26..4
+const STAIR = { x1: 4.1, x2: 8.4, mid: 6.35 }
+const HALL_Z = 3.0 // outer edge of the hallway
+const DOOR = { x1: 1.1, x2: 2.1, h: 2.2 } // hinge on the right jamb (x2)
 const WINDOW = { x1: -4.2, x2: -0.2, y1: 1.0, y2: 2.6 }
-const SHELF_Y = 2.62 // top surface of the shelf above the door
-const HALLWAY_REST = [5.5, 0, 2.6]
-const HALLWAY_REST_ROT = [0, -Math.PI / 2, 0]
+const SHELF_Y = 2.62 // top surface of the indoor shelf above the door
+const WALK_SPEED = 2.0
 
-/** Camera presets. `auto` follow mode switches between them during a simulation. */
-const VIEWS = {
-  hallway: { label: 'Hallway', pos: [7.5, 6, 9], target: [0.5, 1.4, -0.8] },
-  classroom: { label: 'Classroom', pos: [6.8, 4.0, -5.2], target: [2.0, 1.3, -0.8] },
-  overview: { label: 'Overview', pos: [6.5, 12, 10], target: [0.8, 0.8, -1.2] },
-}
+const FLOORS = [
+  { level: 0, label: 'Ground floor', rooms: [101, 102, 103] },
+  { level: 1, label: 'Middle floor', rooms: [201, 202, 203] },
+  { level: 2, label: 'Top floor', rooms: [301, 302, 303] },
+]
 
 const now = () => performance.now() / 1000
 const clamp01 = (v) => Math.min(1, Math.max(0, v))
 const smooth = (v) => v * v * (3 - 2 * v)
 const progress = (t, [a, b]) => clamp01((t - a) / (b - a))
 const flash = (t, hit) => (hit != null && t >= hit ? Math.exp(-(t - hit) * 3) : 0)
+const top = ([x, y, z]) => [x, y + TOP_Y, z] // room-301-local -> world
+
+/** Official SMS wording (Asia/Manila time). */
+function manilaStamp(d = new Date()) {
+  const time = d.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })
+  const date = d.toLocaleDateString('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  return { time, date }
+}
+const smsMessage = (mode, { time, date }) =>
+  `Bantay: ${MOCK_STUDENT.name} checked ${mode === 'exit' ? 'out' : 'in'} at ${time} on ${date} (Manila Time)`
 
 /** Polyline with cumulative lengths so we can sample it at constant speed. */
 function buildPath(points) {
@@ -79,54 +116,107 @@ function samplePath(path, u, out) {
   return i
 }
 
+/** A constant-speed walk starting at `from`. `timeAt(k)` = arrival time at point k. */
+function walk(points, from, { face, speed = WALK_SPEED } = {}) {
+  const path = buildPath(points)
+  return { from, to: from + path.total / speed, path, face, timeAt: (k) => from + path.lens[k] / speed }
+}
+
 /* ------------------------------------------------------------------ */
-/* Wires (cable routes between terminals and the network/SMS cluster)  */
+/* Student routes (world coordinates)                                  */
 /* ------------------------------------------------------------------ */
 
+const COURTYARD_START = [10.5, 0, 6.5]
+const COURTYARD_ROT = [0, -2.6, 0]
+
+/** Ground floor -> top floor via the switchback concrete staircase. */
+function stairClimbPoints() {
+  const pts = []
+  for (const f of [0, STORY]) {
+    const m = f + STORY / 2
+    pts.push(
+      [7.4, f, 0.6],
+      [7.4, f, 0.1],
+      [7.4, m, -2.7], // top of flight 1
+      [7.4, m, -3.45], // mid landing
+      [5.25, m, -3.45],
+      [5.25, m, -2.7],
+      [5.25, f + STORY, 0.1], // top of flight 2
+      [5.25, f + STORY, 0.6],
+    )
+  }
+  return pts
+}
+
+/* Room-local points inside / in front of Room 301 */
+const AT_DOOR_OUTSIDE = [1.5, 0, 0.9]
+const AT_ENTRY_TERMINAL = [0.7, 0, -0.9] // faces the indoor entry terminal
+const AT_EXIT_TERMINAL = [2.6, 0, -0.9] // faces the indoor exit terminal
+const AT_SEAT = [0.45, 0, -2.6] // aisle beside the student's armchair
+
+/* ------------------------------------------------------------------ */
+/* Wires & devices (room-301-local coordinates, inside the room)       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Network topology (all inside Room B 301, on the shelf above the door):
+ *   Hikvision scanners --LAN--> Mercusys AC12G (black router / local switch)
+ *   Mercusys AC12G --LAN--> Mini PC (central node)
+ *   DITO ZTE K10 --internet--> Mini PC  (cellular internet access)
+ *   Mini PC --cloud link--> Cloud database
+ *   Mini PC --trigger--> ESP32 + GSM module --SMS--> parent
+ * Shelf order, left to right: DITO, Mini PC, Mercusys, ESP32 + GSM.
+ */
 const DEVICES = {
-  miniPc: [0.75, SHELF_Y + 0.05, 0.28],
-  mercusys: [1.28, SHELF_Y + 0.025, 0.28],
-  dito: [1.82, SHELF_Y + 0.16, 0.28],
-  esp: [2.38, SHELF_Y + 0.015, 0.3],
-  gsmAntennaTip: [2.53, SHELF_Y + 0.22, 0.3],
-  cloud: [1.82, 4.55, 0.4],
+  dito: [0.62, SHELF_Y + 0.16, -0.28],
+  miniPc: [1.1, SHELF_Y + 0.05, -0.28],
+  mercusys: [1.68, SHELF_Y + 0.025, -0.28],
+  esp: [2.38, SHELF_Y + 0.015, -0.3],
+  gsmAntennaTip: [2.53, SHELF_Y + 0.22, -0.3],
+  cloud: [1.1, 5.6, 0.8],
 }
 
 const WIRES = {
-  // Hallway entry terminal -> Mini PC
+  // Indoor entry terminal (left of the door) -> along the wall under the shelf -> Mercusys LAN port
   entryWire: buildPath([
-    [0.6, 1.62, 0.13],
-    [0.6, 2.5, 0.13],
-    [0.75, 2.58, 0.13],
-    [0.75, 2.67, 0.14],
+    [0.7, 1.62, -0.13],
+    [0.7, 2.5, -0.12],
+    [1.6, 2.5, -0.12],
+    [1.6, 2.645, -0.13],
+    [1.6, 2.66, -0.16],
   ]),
-  // Interior exit terminal -> up the classroom wall -> through the wall -> Mini PC
+  // Indoor exit terminal (right of the door) -> Mercusys LAN port
   exitWire: buildPath([
-    [2.9, 1.62, -0.12],
-    [2.9, 3.0, -0.12],
-    [2.9, 3.0, 0.12],
-    [0.75, 3.0, 0.12],
-    [0.75, 2.72, 0.14],
+    [2.6, 1.62, -0.13],
+    [2.6, 2.5, -0.12],
+    [1.76, 2.5, -0.12],
+    [1.76, 2.645, -0.13],
+    [1.76, 2.66, -0.16],
   ]),
-  // Mini PC -> Mercusys AC12G -> DITO ZTE K10 (LAN)
+  // Mercusys AC12G -> Mini PC (LAN)
   lan: buildPath([
-    [0.75, 2.67, 0.14],
-    [0.75, 2.645, 0.13],
-    [1.28, 2.645, 0.13],
-    [1.82, 2.645, 0.13],
-    [1.82, 2.7, 0.19],
+    [1.55, 2.65, -0.16],
+    [1.55, 2.64, -0.13],
+    [1.15, 2.64, -0.13],
+    [1.15, 2.67, -0.15],
   ]),
-  // DITO router -> cloud (wireless uplink, drawn dashed)
+  // DITO ZTE K10 -> Mini PC (cellular internet access)
+  ditoLink: buildPath([
+    [0.71, 2.7, -0.2],
+    [0.83, 2.69, -0.2],
+    [0.96, 2.68, -0.2],
+  ]),
+  // Mini PC -> cloud database (drawn dashed, up through the roof)
   uplink: buildPath([
-    [1.82, 2.95, 0.28],
-    [1.82, 4.35, 0.4],
+    [1.1, 2.72, -0.28],
+    [1.1, 5.35, 0.8],
   ]),
-  // Mini PC -> ESP32 + GSM (serial/USB trigger)
+  // Mini PC -> ESP32 + GSM (serial/USB trigger), along the shelf's front lip
   espWire: buildPath([
-    [0.75, 2.64, 0.42],
-    [0.75, 2.632, 0.45],
-    [2.22, 2.632, 0.45],
-    [2.29, 2.645, 0.32],
+    [1.1, 2.64, -0.42],
+    [1.1, 2.632, -0.45],
+    [2.22, 2.632, -0.45],
+    [2.29, 2.645, -0.32],
   ]),
 }
 
@@ -134,124 +224,144 @@ const WIRES = {
 /* Simulation timelines (seconds since the button was pressed)         */
 /* ------------------------------------------------------------------ */
 
-const RAW_TIMELINES = {
-  entry: {
-    duration: 11,
-    endLocation: 'classroom',
-    walks: [
-      { from: 0, to: 3, face: Math.PI, path: buildPath([HALLWAY_REST, [0.6, 0, 1.0]]) },
-      {
-        from: 5.8,
-        to: 10,
-        face: -Math.PI / 2,
-        path: buildPath([
-          [0.6, 0, 1.0],
-          [1.6, 0, 0.9],
-          [1.6, 0, -1.0],
-          [0.95, 0, -2.6],
-          [0.95, 0, -3.5],
-        ]),
-      },
-    ],
-    cameras: [
-      { at: 0, view: 'hallway' },
-      { at: 6.2, view: 'overview' },
-    ],
-    scan: { terminal: 'entry', from: 3, to: 5, granted: 4.4 },
-    door: { angle: 1.35, open: [4.8, 5.8], close: [8.8, 9.8] }, // + = swings inward
+/**
+ * Pulses, device hits and the SMS window relative to scan approval G:
+ * scanner -> Mercusys -> Mini PC, then Mini PC -> cloud (internet via DITO)
+ * and Mini PC -> ESP32 + GSM at the same time.
+ */
+function dataFlow(G, terminalWire) {
+  return {
     pulses: [
-      { wire: 'entryWire', from: 6.4, to: 7.4, color: COLORS.lan },
-      { wire: 'lan', from: 7.6, to: 8.4, color: COLORS.lan },
-      { wire: 'uplink', from: 8.4, to: 9.2, color: COLORS.cloud },
-      { wire: 'espWire', from: 7.6, to: 8.5, color: COLORS.sms },
+      { wire: terminalWire, from: G + 0.3, to: G + 1.2, color: COLORS.lan },
+      { wire: 'lan', from: G + 1.3, to: G + 1.8, color: COLORS.lan },
+      { wire: 'ditoLink', from: G + 2.0, to: G + 2.3, color: COLORS.cloud },
+      { wire: 'uplink', from: G + 2.0, to: G + 2.8, color: COLORS.cloud },
+      { wire: 'espWire', from: G + 2.0, to: G + 2.8, color: COLORS.sms },
     ],
-    hits: { miniPc: 7.4, mercusys: 8.0, dito: 8.4, esp: 8.5, cloud: 9.2 },
-    sms: [8.5, 10.5],
-    status: [
-      { at: 0, text: 'Approaching entry terminal…', tone: 'idle' },
-      { at: 3, text: 'Scanning face…', tone: 'scan' },
-      { at: 4.4, text: 'Room Access Granted', tone: 'ok' },
-    ],
-    logs: [
-      { at: 4.4, icon: '✓', text: 'Face verified at hallway entry terminal (Hikvision).' },
-      { at: 7.6, icon: '✓', text: 'Local processing via Mini PC complete.' },
-      {
-        at: 8.8,
-        icon: '✉',
-        sms: true,
-        text: 'Alert 1: SMS Alert dispatched to parent via ESP32 & GSM Module (DITO Network).',
-      },
-      { at: 9.3, icon: '☁', text: 'Alert 2: Section attendance logged in cloud database.' },
-    ],
-  },
-  exit: {
-    duration: 11,
-    endLocation: 'hallway',
-    walks: [
-      {
-        from: 0,
-        to: 2.8,
-        face: 0,
-        path: buildPath([
-          [0.95, 0, -3.5],
-          [1.3, 0, -2.2],
-          [2.9, 0, -0.95],
-        ]),
-      },
-      {
-        from: 5.6,
-        to: 10,
-        path: buildPath([
-          [2.9, 0, -0.95],
-          [1.6, 0, -0.95],
-          [1.6, 0, 1.0],
-          HALLWAY_REST,
-        ]),
-      },
-    ],
-    cameras: [
-      { at: 0, view: 'classroom' },
-      { at: 6.0, view: 'hallway' },
-    ],
-    scan: { terminal: 'exit', from: 2.8, to: 4.8, granted: 4.2 },
-    door: { angle: -1.35, open: [4.6, 5.6], close: [8.4, 9.4] }, // - = swings outward
-    pulses: [
-      { wire: 'exitWire', from: 5.8, to: 7.0, color: COLORS.lan },
-      { wire: 'lan', from: 7.2, to: 8.0, color: COLORS.lan },
-      { wire: 'uplink', from: 8.0, to: 8.8, color: COLORS.cloud },
-      { wire: 'espWire', from: 7.2, to: 8.1, color: COLORS.sms },
-    ],
-    hits: { miniPc: 7.0, mercusys: 7.6, dito: 8.0, esp: 8.1, cloud: 8.8 },
-    sms: [8.1, 10.1],
-    status: [
-      { at: 0, text: 'Approaching exit terminal…', tone: 'idle' },
-      { at: 2.8, text: 'Scanning face…', tone: 'scan' },
-      { at: 4.2, text: 'Exit Logged', tone: 'ok' },
-    ],
-    logs: [
-      { at: 4.2, icon: '✓', text: 'Face verified at interior exit terminal (Hikvision).' },
-      { at: 7.2, icon: '✓', text: 'Local processing via Mini PC complete.' },
-      {
-        at: 8.4,
-        icon: '✉',
-        sms: true,
-        text: 'Alert: SMS Exit Alert dispatched to parent via ESP32 & GSM Module.',
-      },
-      { at: 9.0, icon: '☁', text: 'Cloud log updated with exit time.' },
-    ],
-  },
+    hits: { mercusys: G + 1.2, miniPc: G + 1.8, dito: G + 2.0, esp: G + 2.8, cloud: G + 2.8 },
+    sms: [G + 2.8, G + 7.8],
+  }
 }
 
-// Precompute the moments the dashboard needs to re-render.
-const TIMELINES = Object.fromEntries(
-  Object.entries(RAW_TIMELINES).map(([key, tl]) => [
-    key,
-    {
-      ...tl,
-      thresholds: [...new Set([...tl.status, ...tl.logs].map((e) => e.at))].sort((a, b) => a - b),
-    },
-  ]),
-)
+/** Dashboard log entries shared by both flows (text differs per flow). */
+function dataLogs(G, kind) {
+  const entry = kind === 'entry'
+  return [
+    { at: G, icon: '✓', text: `Face verified at indoor ${kind} terminal (Hikvision).` },
+    { at: G + 1.2, icon: '⇄', text: 'Scan data received by Mercusys AC12G (local LAN).' },
+    { at: G + 2.0, icon: '✓', text: 'Local processing via Mini PC complete.' },
+    entry
+      ? { at: G + 3.0, icon: '✉', sms: true, text: 'Alert 1: SMS Alert dispatched to parent via ESP32 & GSM Module (DITO Network).' }
+      : { at: G + 3.0, icon: '✉', sms: true, text: 'Alert: SMS Exit Alert dispatched to parent via ESP32 & GSM Module.' },
+    entry
+      ? { at: G + 3.2, icon: '☁', text: 'Alert 2: Section attendance logged in cloud database.' }
+      : { at: G + 3.2, icon: '☁', text: 'Cloud log updated with exit time.' },
+  ]
+}
+
+function makeEntryTimeline() {
+  // 1. Courtyard -> up both staircases -> top hallway -> in front of Room B 301
+  const climb = stairClimbPoints()
+  const approach = walk(
+    [COURTYARD_START, ...climb, top([5.25, 0, 1.5]), top([1.5, 0, 1.5]), top(AT_DOOR_OUTSIDE)],
+    0,
+    { face: Math.PI },
+  )
+  const reachedTopHall = approach.timeAt(climb.length) // first point on the top hallway
+  // 2. Door swings inward, 3. student steps inside to the indoor entry terminal
+  const doorOpen = [approach.to + 0.2, approach.to + 1.2]
+  const stepIn = walk([top(AT_DOOR_OUTSIDE), top([1.5, 0, -0.6]), top(AT_ENTRY_TERMINAL)], approach.to + 1.0, {
+    face: 0,
+  })
+  // 4. Face scan
+  const s0 = stepIn.to + 0.2
+  const scan = { terminal: 'entry', from: s0, to: s0 + 2, granted: s0 + 1.4 }
+  const G = scan.granted
+  // 5. Walk to the armchair while data flows
+  const toSeat = walk([top(AT_ENTRY_TERMINAL), top([0.45, 0, -1.3]), top(AT_SEAT)], scan.to + 0.2, {
+    face: -Math.PI / 2,
+  })
+  const flow = dataFlow(G, 'entryWire')
+  return {
+    endLocation: 'classroom',
+    duration: Math.max(toSeat.to, flow.sms[1]) + 0.4,
+    walks: [approach, stepIn, toSeat],
+    door: { angle: -1.35, open: doorOpen, close: [s0, s0 + 1] }, // negative = swings inward
+    scan,
+    ...flow,
+    cameras: [
+      { at: 0, view: 'follow' },
+      { at: reachedTopHall + 0.5, view: 'hallway' },
+      { at: doorOpen[0] + 0.6, view: 'classroom' },
+    ],
+    status: [
+      { at: 0, text: 'Walking up to the top floor…', tone: 'idle' },
+      { at: reachedTopHall, text: 'Approaching Room B 301…', tone: 'idle' },
+      { at: stepIn.from, text: 'Stepping in to entry terminal…', tone: 'idle' },
+      { at: scan.from, text: 'Scanning face…', tone: 'scan' },
+      { at: G, text: 'Room Access Granted', tone: 'ok' },
+    ],
+    logs: dataLogs(G, 'entry'),
+  }
+}
+
+function makeExitTimeline() {
+  // 1. Armchair -> indoor exit terminal
+  const toTerminal = walk([top(AT_SEAT), top([0.9, 0, -1.6]), top(AT_EXIT_TERMINAL)], 0, { face: 0 })
+  // 2. Face scan
+  const s0 = toTerminal.to + 0.2
+  const scan = { terminal: 'exit', from: s0, to: s0 + 2, granted: s0 + 1.4 }
+  const G = scan.granted
+  // 3. Door swings outward, 4. student walks out to the hallway and back down the stairs
+  const doorOpen = [scan.to - 0.4, scan.to + 0.6]
+  const out = walk(
+    [
+      top(AT_EXIT_TERMINAL),
+      top([1.5, 0, -0.75]),
+      top([1.5, 0, 1.5]), // index 2: outside, clear of the door leaf
+      top([5.25, 0, 1.5]),
+      ...stairClimbPoints().reverse(),
+      COURTYARD_START,
+    ],
+    scan.to + 0.4,
+  )
+  const outside = out.timeAt(2)
+  const flow = dataFlow(G, 'exitWire')
+  return {
+    endLocation: 'courtyard',
+    duration: Math.max(out.to, flow.sms[1]) + 0.4,
+    walks: [toTerminal, out],
+    door: { angle: 1.35, open: doorOpen, close: [outside + 0.4, outside + 1.4] }, // positive = outward
+    scan,
+    ...flow,
+    cameras: [
+      { at: 0, view: 'classroom' },
+      { at: outside, view: 'hallway' },
+      { at: Math.max(out.timeAt(4), flow.sms[1] - 1), view: 'follow' },
+    ],
+    status: [
+      { at: 0, text: 'Walking to exit terminal…', tone: 'idle' },
+      { at: scan.from, text: 'Scanning face…', tone: 'scan' },
+      { at: G, text: 'Exit Logged', tone: 'ok' },
+    ],
+    logs: dataLogs(G, 'exit'),
+  }
+}
+
+const withThresholds = (tl) => ({
+  ...tl,
+  thresholds: [...new Set([...tl.status, ...tl.logs].map((e) => e.at))].sort((a, b) => a - b),
+})
+
+const TIMELINES = { entry: withThresholds(makeEntryTimeline()), exit: withThresholds(makeExitTimeline()) }
+
+/** Camera presets (world coordinates). `follow` tracks the student. */
+const VIEWS = {
+  hallway: { label: 'Hallway', pos: [8.5, TOP_Y + 3.0, 9], target: [0, TOP_Y + 1.5, 0.3] },
+  classroom: { label: 'Classroom', pos: [-3.4, TOP_Y + 2.6, -5.5], target: [1.6, TOP_Y + 1.7, -0.3] },
+  overview: { label: 'Overview', pos: [16, 22, 34], target: [-10, 4.5, -1] },
+}
+const FOLLOW_OFFSET = new THREE.Vector3(4.5, 3.0, 6.5)
 
 /* ------------------------------------------------------------------ */
 /* Shared simulation clock                                             */
@@ -319,14 +429,16 @@ function Block({ position, size, color, mat, shadow = true, ...props }) {
 }
 
 /**
- * Floating HTML label. `side` hides it when the camera is on the other side
- * of the hallway/classroom wall (z = 0), since HTML labels aren't occluded.
+ * Floating HTML label. HTML isn't occluded by walls, so `side` hides it when
+ * the camera can't see that side of Room 301's front wall (z = 0):
+ * 'hallway' needs the camera in front, 'classroom' needs it inside or above the roof.
  */
-function Label({ position, children, show = true, tone = 'dark', side }) {
+function Label({ position, children, show = true, tone = 'dark', side, size = 'text-[11px]' }) {
   const el = useRef()
   useFrame(({ camera }) => {
     if (!el.current || !side) return
-    const visible = side === 'hallway' ? camera.position.z > 0 : camera.position.z < 0
+    const { y, z } = camera.position
+    const visible = side === 'hallway' ? z > 0 : z < 0 || y > ROOF_TOP + 0.3
     el.current.style.visibility = visible ? 'visible' : 'hidden'
   })
   if (!show) return null
@@ -336,7 +448,7 @@ function Label({ position, children, show = true, tone = 'dark', side }) {
     <Html position={position} center distanceFactor={8} zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
       <div
         ref={el}
-        className={`pointer-events-none select-none whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium shadow ${toneClass}`}
+        className={`pointer-events-none select-none whitespace-nowrap rounded px-1.5 py-0.5 font-medium shadow ${size} ${toneClass}`}
       >
         {children}
       </div>
@@ -344,77 +456,109 @@ function Label({ position, children, show = true, tone = 'dark', side }) {
   )
 }
 
-function useCanvasTexture(draw, deps, repeat) {
-  return useMemo(() => {
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    draw(canvas, ctx)
-    const tex = new THREE.CanvasTexture(canvas)
-    tex.colorSpace = THREE.SRGBColorSpace
-    if (repeat) {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-      tex.repeat.set(...repeat)
-    }
-    tex.anisotropy = 4
-    return tex
-  }, deps)
+/* Canvas-generated textures (no external assets). Canvases are cached per kind. */
+const canvasCache = {}
+function cachedCanvas(key, draw) {
+  if (!canvasCache[key]) {
+    const c = document.createElement('canvas')
+    draw(c, c.getContext('2d'))
+    canvasCache[key] = c
+  }
+  return canvasCache[key]
+}
+function canvasTexture(canvas, repeat) {
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  if (repeat) {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+    tex.repeat.set(...repeat)
+  }
+  return tex
 }
 
-/* ------------------------------------------------------------------ */
-/* Environment: floor, walls, door, sign, window, classroom            */
-/* ------------------------------------------------------------------ */
+/** 2 m x 2 m texture tile of 4x4 light 0.5 m floor tiles. */
+const tileCanvas = () =>
+  cachedCanvas('tiles', (c, g) => {
+    c.width = c.height = 512
+    g.fillStyle = '#cfc8b8'
+    g.fillRect(0, 0, 512, 512)
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        g.fillStyle = (i + j) % 2 ? '#f1ede3' : '#ece6d8'
+        g.fillRect(i * 128 + 3, j * 128 + 3, 122, 122)
+      }
+  })
 
-function Floor() {
-  // 4x4 light tiles per texture tile (2 m x 2 m => 0.5 m tiles)
-  const tex = useCanvasTexture(
-    (c, g) => {
-      c.width = c.height = 512
-      g.fillStyle = '#cfc8b8'
-      g.fillRect(0, 0, 512, 512)
-      for (let i = 0; i < 4; i++)
-        for (let j = 0; j < 4; j++) {
-          g.fillStyle = (i + j) % 2 ? '#f1ede3' : '#ece6d8'
-          g.fillRect(i * 128 + 3, j * 128 + 3, 122, 122)
-        }
-    },
-    [],
-    [7, 5.25],
-  )
+/** Transparent square grid (for railings and simple window grilles). */
+const gridCanvas = (color) =>
+  cachedCanvas(`grid-${color}`, (c, g) => {
+    c.width = c.height = 64
+    g.clearRect(0, 0, 64, 64)
+    g.fillStyle = color
+    g.fillRect(0, 0, 64, 6)
+    g.fillRect(0, 0, 6, 64)
+  })
+
+function useTextTexture(text, { w = 256, h = 96, font = 'bold 60px Arial, Helvetica, sans-serif', bg = '#fff', fg = '#111' } = {}) {
+  return useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const g = c.getContext('2d')
+    g.fillStyle = bg
+    g.fillRect(0, 0, w, h)
+    g.fillStyle = fg
+    g.font = font
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(text, w / 2, h / 2 + 4)
+    return canvasTexture(c)
+  }, [text, w, h, font, bg, fg])
+}
+
+function TiledFloor({ x1, x2, z1, z2, y = 0 }) {
+  const tex = useMemo(() => canvasTexture(tileCanvas(), [(x2 - x1) / 2, (z2 - z1) / 2]), [x1, x2, z1, z2])
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.75]} receiveShadow>
-      <planeGeometry args={[14, 10.5]} />
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(x1 + x2) / 2, y + 0.005, (z1 + z2) / 2]} receiveShadow>
+      <planeGeometry args={[x2 - x1, z2 - z1]} />
       <meshStandardMaterial map={tex} roughness={0.6} />
     </mesh>
   )
 }
 
-function DividingWall() {
-  const T = 0.1 // half thickness
-  const wall = (x1, x2, y1, y2, key) => (
-    <Box key={key} min={[x1, y1, -T]} max={[x2, y2, T]} color={COLORS.wall} />
+/** Vertical plane with a transparent grid texture. `rotY` turns it. */
+function GridPanel({ position, width, height, color, cell, rotY = 0 }) {
+  const tex = useMemo(() => canvasTexture(gridCanvas(color), [width / cell, height / cell]), [color, width, height, cell])
+  return (
+    <mesh position={position} rotation={[0, rotY, 0]}>
+      <planeGeometry args={[width, height]} />
+      <meshStandardMaterial map={tex} alphaTest={0.5} side={THREE.DoubleSide} metalness={0.4} roughness={0.5} />
+    </mesh>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* Building: courtyard, floors, room fronts, roof                      */
+/* ------------------------------------------------------------------ */
+
+function Courtyard() {
   return (
     <group>
-      {wall(-7, WINDOW.x1, 0, WALL_H, 'l')}
-      {wall(WINDOW.x1, WINDOW.x2, 0, WINDOW.y1, 'under-window')}
-      {wall(WINDOW.x1, WINDOW.x2, WINDOW.y2, WALL_H, 'over-window')}
-      {wall(WINDOW.x2, DOOR.x1, 0, WALL_H, 'between')}
-      {wall(DOOR.x1, DOOR.x2, DOOR.h, WALL_H, 'over-door')}
-      {wall(DOOR.x2, 7, 0, WALL_H, 'r')}
-      {/* Dark brown lower border (baseboard) on both faces */}
-      <Box min={[-7, 0, -0.12]} max={[DOOR.x1 - 0.06, 0.3, 0.12]} color={COLORS.baseboard} />
-      <Box min={[DOOR.x2 + 0.06, 0, -0.12]} max={[7, 0.3, 0.12]} color={COLORS.baseboard} />
-      {/* Door frame */}
-      <Box min={[DOOR.x1 - 0.06, 0, -0.12]} max={[DOOR.x1, DOOR.h + 0.06, 0.12]} color={COLORS.frame} />
-      <Box min={[DOOR.x2, 0, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} />
-      <Box min={[DOOR.x1 - 0.06, DOOR.h, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-8, -0.02, 10]} receiveShadow>
+        <planeGeometry args={[90, 60]} />
+        <meshStandardMaterial color="#c9c3b3" roughness={0.95} />
+      </mesh>
+      {/* Garden plot in the courtyard */}
+      <Box min={[-20, -0.02, 6]} max={[-4, 0.12, 12]} color="#7a9a5a" />
     </group>
   )
 }
 
-function Door() {
+function Door({ animated = false, shadow = true }) {
   const pivot = useRef()
   useSimFrame(({ tl, t }) => {
+    if (!animated) return
     let angle = 0
     if (tl) {
       const { angle: a, open, close } = tl.door
@@ -423,40 +567,48 @@ function Door() {
     pivot.current.rotation.y = angle
   })
   const w = DOOR.x2 - DOOR.x1
-  const inset = (y1, y2, z) => (
-    <Box min={[0.15, y1, z > 0 ? 0.025 : -0.035]} max={[w - 0.15, y2, z > 0 ? 0.035 : -0.025]} color={COLORS.doorInset} />
+  const inset = (y1, y2, front) => (
+    <Box
+      min={[-(w - 0.15), y1, front ? 0.025 : -0.035]}
+      max={[-0.15, y2, front ? 0.035 : -0.025]}
+      color={COLORS.doorInset}
+      shadow={shadow}
+    />
   )
   return (
-    // Hinge on the left jamb of the doorway
-    <group ref={pivot} position={[DOOR.x1, 0, 0]}>
-      <Box min={[0.01, 0.01, -0.025]} max={[w - 0.01, DOOR.h - 0.01, 0.025]} color={COLORS.door} mat={{ roughness: 0.5 }} />
-      {inset(1.25, 2.0, 1)}
-      {inset(0.2, 1.05, 1)}
-      {inset(1.25, 2.0, -1)}
-      {inset(0.2, 1.05, -1)}
+    // Hinge on the right jamb; the leaf extends toward -x.
+    <group ref={pivot} position={[DOOR.x2, 0, 0]}>
+      <Box
+        min={[-(w - 0.01), 0.01, -0.025]}
+        max={[-0.01, DOOR.h - 0.01, 0.025]}
+        color={COLORS.door}
+        mat={{ roughness: 0.5 }}
+        shadow={shadow}
+      />
+      {inset(1.25, 2.0, true)}
+      {inset(0.2, 1.05, true)}
+      {inset(1.25, 2.0, false)}
+      {inset(0.2, 1.05, false)}
       {[0.05, -0.05].map((z) => (
-        <Block key={z} position={[w - 0.12, 1.0, z]} size={[0.1, 0.03, 0.04]} color="#c9a227" mat={{ metalness: 0.8, roughness: 0.3 }} />
+        <Block
+          key={z}
+          position={[-(w - 0.12), 1.0, z]}
+          size={[0.1, 0.03, 0.04]}
+          color="#c9a227"
+          mat={{ metalness: 0.8, roughness: 0.3 }}
+          shadow={false}
+        />
       ))}
     </group>
   )
 }
 
-function RoomSign() {
-  const tex = useCanvasTexture((c, g) => {
-    c.width = 256
-    c.height = 96
-    g.fillStyle = '#ffffff'
-    g.fillRect(0, 0, 256, 96)
-    g.fillStyle = '#111111'
-    g.font = 'bold 60px Arial, Helvetica, sans-serif'
-    g.textAlign = 'center'
-    g.textBaseline = 'middle'
-    g.fillText('B 301', 128, 52)
-  }, [])
+function RoomSign({ text }) {
+  const tex = useTextTexture(text)
   const x = (DOOR.x1 + DOOR.x2) / 2
   return (
     <group position={[x, 2.39, 0.1]}>
-      <Block position={[0, 0, 0.01]} size={[0.42, 0.16, 0.02]} color="#ffffff" />
+      <Block position={[0, 0, 0.01]} size={[0.42, 0.16, 0.02]} color="#ffffff" shadow={false} />
       <mesh position={[0, 0, 0.021]}>
         <planeGeometry args={[0.4, 0.15]} />
         <meshBasicMaterial map={tex} toneMapped={false} />
@@ -478,19 +630,14 @@ function Curtain({ x1, x2, z }) {
           rotation={[0, i % 2 ? 0.35 : -0.35, 0]}
         >
           <planeGeometry args={[w * 1.08, h]} />
-          <meshStandardMaterial
-            color={COLORS.curtain}
-            transparent
-            opacity={0.55}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
+          <meshStandardMaterial color={COLORS.curtain} transparent opacity={0.55} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       ))}
     </group>
   )
 }
 
+/** Room 301's detailed multi-pane window: 3D grille bars + pleated curtains. */
 function WindowWithGrilles() {
   const { x1, x2, y1, y2 } = WINDOW
   const cx = (x1 + x2) / 2
@@ -501,18 +648,18 @@ function WindowWithGrilles() {
   for (let x = x1 + 0.2; x < x2 - 0.05; x += 0.2) verticals.push(x)
   return (
     <group>
-      {/* Aluminum frame + mullions */}
+      {/* Aluminum frame, mullions and transom (multi-pane) */}
       <Box min={[x1, y1 - 0.04, -0.13]} max={[x2, y1, 0.13]} color={COLORS.aluminum} mat={metal} />
       <Box min={[x1, y2, -0.11]} max={[x2, y2 + 0.04, 0.11]} color={COLORS.aluminum} mat={metal} />
-      {[x1, x1 + w / 3, x1 + (2 * w) / 3, x2].map((x) => (
+      <Box min={[x1, y1 + h * 0.7 - 0.02, -0.03]} max={[x2, y1 + h * 0.7 + 0.02, 0.03]} color={COLORS.aluminum} mat={metal} />
+      {[x1, x1 + w / 4, cx, x1 + (3 * w) / 4, x2].map((x) => (
         <Box key={x} min={[x - 0.025, y1, -0.03]} max={[x + 0.025, y2, 0.03]} color={COLORS.aluminum} mat={metal} />
       ))}
-      {/* Glass */}
       <mesh position={[cx, y1 + h / 2, 0]}>
         <planeGeometry args={[w, h]} />
         <meshStandardMaterial color="#cfe9f5" transparent opacity={0.18} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {/* Security grilles on the hallway side */}
+      {/* Dark metal security grilles (hallway side) */}
       <group position={[0, 0, 0.16]}>
         <Box min={[x1, y1, -0.015]} max={[x2, y1 + 0.03, 0.015]} color={COLORS.metal} mat={metal} />
         <Box min={[x1, y2 - 0.03, -0.015]} max={[x2, y2, 0.015]} color={COLORS.metal} mat={metal} />
@@ -524,12 +671,6 @@ function WindowWithGrilles() {
         {[y1 + h * 0.33, y1 + h * 0.66].map((y) => (
           <Block key={y} position={[cx, y, 0]} size={[w, 0.025, 0.025]} color={COLORS.metal} mat={metal} />
         ))}
-        {/* Brackets anchoring the grille to the wall */}
-        {[x1 + 0.05, x2 - 0.05].map((x) =>
-          [y1 + 0.05, y2 - 0.05].map((y) => (
-            <Block key={`${x}${y}`} position={[x, y, -0.04]} size={[0.04, 0.04, 0.06]} color={COLORS.metal} />
-          )),
-        )}
       </group>
       {/* Curtain rod + semi-transparent yellow curtains (classroom side) */}
       <mesh position={[cx, y2 + 0.12, -0.2]} rotation={[0, 0, Math.PI / 2]}>
@@ -542,68 +683,333 @@ function WindowWithGrilles() {
   )
 }
 
-function Desk({ x, z }) {
-  const top = 0.74
-  const chairZ = z + 0.48
+/** Lightweight window for the other 8 classrooms (textured grille, flat curtain). */
+function SimpleWindow() {
+  const { x1, x2, y1, y2 } = WINDOW
+  const cx = (x1 + x2) / 2
+  const w = x2 - x1
+  const h = y2 - y1
   return (
     <group>
-      <Block position={[x, top, z]} size={[0.62, 0.04, 0.45]} color={COLORS.wood} />
-      <Block position={[x, top - 0.12, z - 0.05]} size={[0.56, 0.02, 0.32]} color={COLORS.wood} />
-      {[-0.27, 0.27].map((dx) =>
-        [-0.19, 0.19].map((dz) => (
-          <Block key={`${dx}${dz}`} position={[x + dx, top / 2, z + dz]} size={[0.04, top, 0.04]} color="#2e1b0f" />
-        )),
-      )}
-      {/* Chair */}
-      <Block position={[x, 0.44, chairZ]} size={[0.4, 0.04, 0.38]} color={COLORS.wood} />
-      <Block position={[x, 0.7, chairZ + 0.18]} size={[0.4, 0.3, 0.03]} color={COLORS.wood} />
-      {[-0.17, 0.17].map((dx) =>
-        [-0.16, 0.16].map((dz) => (
-          <Block key={`${dx}${dz}`} position={[x + dx, 0.21, chairZ + dz]} size={[0.035, 0.42, 0.035]} color="#2e1b0f" />
-        )),
-      )}
+      <Box min={[x1, y1 - 0.04, -0.13]} max={[x2, y1, 0.13]} color={COLORS.aluminum} shadow={false} />
+      <Box min={[x1, y2, -0.11]} max={[x2, y2 + 0.04, 0.11]} color={COLORS.aluminum} shadow={false} />
+      <mesh position={[cx, y1 + h / 2, 0]}>
+        <planeGeometry args={[w, h]} />
+        <meshStandardMaterial color="#9fb9c4" transparent opacity={0.45} depthWrite={false} />
+      </mesh>
+      <mesh position={[cx, y1 + h / 2 + 0.05, -0.15]}>
+        <planeGeometry args={[w, h]} />
+        <meshStandardMaterial color={COLORS.curtain} transparent opacity={0.7} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <GridPanel position={[cx, y1 + h / 2, 0.16]} width={w} height={h} color="#2b2f36" cell={0.2} />
     </group>
   )
 }
 
-function Classroom() {
-  const cols = [-4.6, -3.0, -1.4, 0.2]
-  const rows = [-2.4, -3.8, -5.1]
+/** Hallway-facing wall of one classroom: wall, baseboard, door, sign, window. */
+function RoomFront({ number, detailed }) {
+  const T = 0.1
+  const s = detailed // cast shadows only for the hero room
+  const wall = (x1, x2, y1, y2) => (
+    <Box key={`${x1}-${y1}`} min={[x1, y1, -T]} max={[x2, y2, T]} color={COLORS.wall} shadow={s} />
+  )
   return (
     <group>
-      {/* Back wall with blackboard */}
-      <Box min={[-7.1, 0, -6.1]} max={[7, WALL_H, -6]} color={COLORS.wall} />
-      <Box min={[-7, 0, -6]} max={[7, 0.3, -5.96]} color={COLORS.baseboard} />
-      <Box min={[-3.6, 0.95, -6]} max={[1.6, 2.35, -5.97]} color="#5a3a1e" />
-      <Box min={[-3.5, 1.0, -5.97]} max={[1.5, 2.3, -5.95]} color="#1f3b2d" mat={{ roughness: 0.95 }} />
-      {/* Left wall */}
-      <Box min={[-7.1, 0, -6.1]} max={[-7, WALL_H, 0.1]} color={COLORS.wall} />
-      <Box min={[-7, 0, -6]} max={[-6.96, 0.3, -0.1]} color={COLORS.baseboard} />
-      {cols.map((x) => rows.map((z) => <Desk key={`${x}${z}`} x={x} z={z} />))}
-      {/* Teacher's table */}
-      <Block position={[3.2, 0.76, -4.9]} size={[1.4, 0.05, 0.7]} color={COLORS.wood} />
-      <Block position={[3.2, 0.37, -4.9]} size={[1.3, 0.72, 0.6]} color="#3d2414" />
+      {wall(ROOM.x1, WINDOW.x1, 0, WALL_H)}
+      {wall(WINDOW.x1, WINDOW.x2, 0, WINDOW.y1)}
+      {wall(WINDOW.x1, WINDOW.x2, WINDOW.y2, WALL_H)}
+      {wall(WINDOW.x2, DOOR.x1, 0, WALL_H)}
+      {wall(DOOR.x1, DOOR.x2, DOOR.h, WALL_H)}
+      {wall(DOOR.x2, ROOM.x2, 0, WALL_H)}
+      {/* Dark brown painted lower border, both faces */}
+      <Box min={[ROOM.x1, 0, -0.12]} max={[DOOR.x1 - 0.06, 0.3, 0.12]} color={COLORS.baseboard} shadow={s} />
+      <Box min={[DOOR.x2 + 0.06, 0, -0.12]} max={[ROOM.x2, 0.3, 0.12]} color={COLORS.baseboard} shadow={s} />
+      {/* Door frame */}
+      <Box min={[DOOR.x1 - 0.06, 0, -0.12]} max={[DOOR.x1, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+      <Box min={[DOOR.x2, 0, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+      <Box min={[DOOR.x1 - 0.06, DOOR.h, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+      <Door animated={detailed} shadow={s} />
+      <RoomSign text={`B ${number}`} />
+      {detailed ? <WindowWithGrilles /> : <SimpleWindow />}
     </group>
   )
 }
 
 function HallwayRailing() {
-  const z = 4.4
+  const z = HALL_Z - 0.06
+  const x1 = BUILDING.x1
+  const x2 = STAIR.x2
   const posts = []
-  for (let x = -7; x <= 7; x += 1) posts.push(x)
+  for (let x = x1; x <= x2 + 0.01; x += 2) posts.push(x)
+  const metal = { metalness: 0.5, roughness: 0.4 }
   return (
     <group>
-      <Box min={[-7, 0, z - 0.1]} max={[7, 0.25, z + 0.1]} color="#d8d2c2" />
-      <Box min={[-7, 1.0, z - 0.04]} max={[7, 1.05, z + 0.04]} color={COLORS.metal} mat={{ metalness: 0.6 }} />
+      <Box min={[x1, 0, z - 0.08]} max={[x2, 0.12, z + 0.06]} color={COLORS.slab} shadow={false} />
+      <Box min={[x1, 0.98, z - 0.03]} max={[x2, 1.04, z + 0.03]} color={COLORS.railing} mat={metal} shadow={false} />
       {posts.map((x) => (
-        <Block key={x} position={[x, 0.62, z]} size={[0.04, 0.76, 0.04]} color={COLORS.metal} mat={{ metalness: 0.6 }} />
+        <Block key={x} position={[x, 0.55, z]} size={[0.05, 0.86, 0.05]} color={COLORS.railing} mat={metal} shadow={false} />
       ))}
+      <GridPanel position={[(x1 + x2) / 2, 0.55, z]} width={x2 - x1} height={0.86} color={COLORS.railing} cell={0.15} />
+    </group>
+  )
+}
+
+function FloorLevel({ level, rooms, label, showLabels }) {
+  const y = level * STORY
+  const { x1, x2 } = BUILDING
+  const D = -ROOM.depth
+  return (
+    <group position={[0, y, 0]}>
+      {level > 0 && (
+        <>
+          {/* Concrete floor slab (room + hallway) and the stair landing */}
+          <Box min={[x1 - 0.1, -0.2, D - 0.1]} max={[STAIR.x1, 0, HALL_Z]} color={COLORS.slab} />
+          <Box min={[STAIR.x1, -0.2, 0.1]} max={[STAIR.x2, 0, HALL_Z]} color={COLORS.slab} />
+        </>
+      )}
+      <TiledFloor x1={x1} x2={STAIR.x1} z1={D} z2={HALL_Z} />
+      <TiledFloor x1={STAIR.x1} x2={STAIR.x2} z1={level > 0 ? 0.1 : -4.3} z2={HALL_Z} />
+
+      {/* Back wall, end walls and partitions between classrooms */}
+      <Box min={[x1 - 0.1, 0, D - 0.1]} max={[x2 + 0.1, WALL_H, D]} color={COLORS.wall} shadow={false} />
+      <Box min={[x1 - 0.1, 0, D]} max={[x1, WALL_H, 0.1]} color={COLORS.wall} />
+      <Box min={[x2 - 0.1, 0, D]} max={[x2 + 0.1, WALL_H, 0.1]} color={COLORS.wall} />
+      {[x1 + ROOM_W, x1 + 2 * ROOM_W].map((px) => (
+        <Box key={px} min={[px - 0.05, 0, D]} max={[px + 0.05, WALL_H, -0.1]} color={COLORS.wall} shadow={false} />
+      ))}
+
+      {/* Room fronts: 301 sits at room-local x; 302/303 (etc.) step 10 m to the left */}
+      {rooms.map((n, i) => (
+        <group key={n} position={[-i * ROOM_W, 0, 0]}>
+          <RoomFront number={n} detailed={n === 301} />
+        </group>
+      ))}
+
+      <HallwayRailing />
+      <Label show={showLabels} position={[x1 - 1.4, 1.6, 1.5]} tone="light" size="text-[13px]">
+        {label} · Rooms {rooms[0]}–{rooms[rooms.length - 1]}
+      </Label>
+    </group>
+  )
+}
+
+/** Roof slab; hidden whenever the camera is above it so the top floor stays visible. */
+function Roof() {
+  const ref = useRef()
+  useFrame(({ camera }) => {
+    ref.current.visible = camera.position.y < ROOF_TOP + 0.3
+  })
+  return (
+    <group ref={ref}>
+      <Box
+        min={[BUILDING.x1 - 0.2, ROOF_TOP - 0.2, -ROOM.depth - 0.2]}
+        max={[STAIR.x2 + 0.1, ROOF_TOP, HALL_Z + 0.1]}
+        color="#b9b3a5"
+        shadow={false}
+      />
     </group>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Hardware: face-recognition terminals                                */
+/* Concrete switchback staircase (beside Room 301)                     */
+/* ------------------------------------------------------------------ */
+
+const STEPS = 10
+const RISE = STORY / 2 / STEPS
+const TREAD = 2.8 / STEPS
+const SLOPE = Math.atan2(STORY / 2, 2.8)
+
+function Flight({ base, up }) {
+  // up = true: flight 1 (x 6.4..8.4) climbs toward -z; false: flight 2 (x 4.1..6.3) climbs toward +z
+  return Array.from({ length: STEPS }, (_, i) => {
+    const t = base + (i + 0.5) * RISE
+    const [z1, z2] = up ? [0.1 - (i + 1) * TREAD, 0.1 - i * TREAD] : [-2.7 + i * TREAD, -2.7 + (i + 1) * TREAD]
+    const [x1, x2] = up ? [6.4, STAIR.x2] : [STAIR.x1, 6.3]
+    return <Box key={i} min={[x1, t - 0.3, z1]} max={[x2, t, z2]} color={i % 2 ? COLORS.concrete : COLORS.concreteLight} />
+  })
+}
+
+function Staircase({ showLabels }) {
+  return (
+    <group>
+      {[0, STORY].map((f) => {
+        const mid = f + STORY / 2
+        return (
+          <group key={f}>
+            <Flight base={f} up />
+            <Box min={[STAIR.x1, mid - 0.2, -4.3]} max={[STAIR.x2, mid, -2.7]} color={COLORS.concrete} />
+            <Flight base={mid} up={false} />
+            {/* Concrete parapets: outer edge + divider along flight 1, mid-landing edge */}
+            {[STAIR.x2 - 0.05, STAIR.mid].map((x) => (
+              <Block
+                key={x}
+                position={[x, f + STORY / 4 + 0.45, -1.3]}
+                size={[0.1, 0.9, Math.hypot(2.8, STORY / 2)]}
+                rotation={[SLOPE, 0, 0]}
+                color={COLORS.concrete}
+              />
+            ))}
+            <Box min={[STAIR.x2 - 0.1, mid, -4.3]} max={[STAIR.x2, mid + 0.9, -2.7]} color={COLORS.concrete} />
+          </group>
+        )
+      })}
+      {/* Stairwell back wall */}
+      <Box min={[STAIR.x1, 0, -4.4]} max={[STAIR.x2, ROOF_TOP - 0.2, -4.3]} color={COLORS.wall} />
+      <Box min={[STAIR.x1, 0, -4.3]} max={[STAIR.x2, 0.3, -4.26]} color={COLORS.baseboard} />
+      {/* Green grid railings on the upper landings' open side */}
+      {[STORY, TOP_Y].map((y) => (
+        <GridPanel
+          key={y}
+          position={[STAIR.x2 - 0.04, y + 0.55, (0.1 + HALL_Z) / 2]}
+          width={HALL_Z - 0.1}
+          height={0.86}
+          color={COLORS.railing}
+          cell={0.15}
+          rotY={Math.PI / 2}
+        />
+      ))}
+      <Label show={showLabels} side="hallway" position={[7.4, TOP_Y + 2.4, 1.6]}>
+        Stair landing · Top floor
+      </Label>
+    </group>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Room B 301 interior (room-local coordinates)                        */
+/* ------------------------------------------------------------------ */
+
+/** Dark wooden student armchair with a writing tablet on the right; faces -z (front). */
+function Armchair({ x, z }) {
+  const legs = []
+  for (const dx of [-0.18, 0.18]) for (const dz of [-0.18, 0.18]) legs.push([dx, dz])
+  return (
+    <group position={[x, 0, z]}>
+      <Block position={[0, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.wood} />
+      <Block position={[0, 0.74, 0.2]} size={[0.42, 0.3, 0.03]} color={COLORS.wood} />
+      <Block position={[0.25, 0.73, -0.1]} size={[0.24, 0.025, 0.5]} color={COLORS.wood} />
+      <Block position={[0.33, 0.6, 0.05]} size={[0.03, 0.27, 0.03]} color={COLORS.woodDark} />
+      {legs.map(([dx, dz]) => (
+        <Block key={`${dx}${dz}`} position={[dx, 0.215, dz]} size={[0.03, 0.43, 0.03]} color={COLORS.woodDark} />
+      ))}
+    </group>
+  )
+}
+
+function FluorescentLight({ x, z }) {
+  return (
+    <group position={[x, WALL_H - 0.12, z]}>
+      <Block position={[0, 0, 0]} size={[1.25, 0.05, 0.22]} color="#e5e7eb" shadow={false} />
+      <Block
+        position={[0, -0.035, 0]}
+        size={[1.15, 0.025, 0.07]}
+        color="#ffffff"
+        mat={{ emissive: '#ffffff', emissiveIntensity: 1.6, toneMapped: false }}
+        shadow={false}
+      />
+      {[-0.5, 0.5].map((dx) => (
+        <Block key={dx} position={[dx, 0.07, 0]} size={[0.015, 0.1, 0.015]} color="#9ca3af" shadow={false} />
+      ))}
+    </group>
+  )
+}
+
+function HardHat({ position }) {
+  return (
+    <group position={position}>
+      <mesh castShadow>
+        <sphereGeometry args={[0.13, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#f97316" roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 0.006, 0]}>
+        <cylinderGeometry args={[0.165, 0.165, 0.012, 24]} />
+        <meshStandardMaterial color="#ea580c" roughness={0.4} />
+      </mesh>
+    </group>
+  )
+}
+
+/** Safety equipment display on the side wall near the door. */
+function SafetyDisplay() {
+  const sign = useTextTexture('SAFETY EQUIPMENT', {
+    w: 512,
+    h: 96,
+    font: 'bold 52px Arial, Helvetica, sans-serif',
+    bg: '#15803d',
+    fg: '#ffffff',
+  })
+  const wx = ROOM.x2 - 0.1 // inner face of the side wall
+  return (
+    <group>
+      {/* Wall rack with orange hard hats */}
+      <Box min={[wx - 0.28, 1.56, -2.8]} max={[wx, 1.6, -0.9]} color={COLORS.wood} />
+      {[-2.8, -0.9].map((z) => (
+        <Box key={z} min={[wx - 0.25, 1.36, z === -2.8 ? z : z - 0.03]} max={[wx, 1.56, z === -2.8 ? z + 0.03 : z]} color={COLORS.woodDark} />
+      ))}
+      {[-2.5, -2.05, -1.6, -1.15].map((z) => (
+        <HardHat key={z} position={[wx - 0.15, 1.6, z]} />
+      ))}
+      <mesh position={[wx - 0.005, 2.05, -1.85]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[1.2, 0.22]} />
+        <meshBasicMaterial map={sign} toneMapped={false} />
+      </mesh>
+      {/* Fire extinguisher on a bracket */}
+      <mesh position={[wx - 0.12, 0.95, -3.3]} castShadow>
+        <cylinderGeometry args={[0.08, 0.08, 0.5, 16]} />
+        <meshStandardMaterial color="#dc2626" roughness={0.35} />
+      </mesh>
+      <Block position={[wx - 0.12, 1.25, -3.3]} size={[0.06, 0.1, 0.06]} color="#111" />
+    </group>
+  )
+}
+
+function Room301Interior() {
+  const D = -ROOM.depth
+  const cols = [-4.8, -3.7, -2.6, -1.5, -0.4]
+  const rows = [-1.7, -2.6, -3.5, -4.4]
+  return (
+    <group>
+      {/* Lower dark brown border on the inside faces */}
+      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x2 - 0.1, 0.3, D + 0.04]} color={COLORS.baseboard} />
+      <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
+      <Box min={[ROOM.x2 - 0.14, 0, D]} max={[ROOM.x2 - 0.1, 0.3, -0.1]} color={COLORS.baseboard} />
+
+      {/* Front of the room: green chalkboard flanked by whiteboards */}
+      <Box min={[-4.5, 0.95, D]} max={[-0.7, 2.35, D + 0.03]} color="#5a3a1e" />
+      <Box min={[-4.4, 1.0, D + 0.03]} max={[-0.8, 2.3, D + 0.05]} color="#1f4d34" mat={{ roughness: 0.95 }} />
+      <Box min={[-4.4, 0.92, D + 0.03]} max={[-0.8, 0.95, D + 0.12]} color="#5a3a1e" />
+      {[
+        [-5.8, -4.8],
+        [-0.3, 2.1],
+      ].map(([a, b]) => (
+        <group key={a}>
+          <Box min={[a, 1.0, D]} max={[b, 2.2, D + 0.03]} color={COLORS.aluminum} mat={{ metalness: 0.6 }} />
+          <Box min={[a + 0.04, 1.04, D + 0.03]} max={[b - 0.04, 2.16, D + 0.045]} color="#fafafa" mat={{ roughness: 0.2 }} />
+        </group>
+      ))}
+
+      {/* Teacher's desk + chair */}
+      <Block position={[2.4, 0.76, -5.0]} size={[1.4, 0.05, 0.7]} color={COLORS.wood} />
+      <Block position={[2.4, 0.37, -5.12]} size={[1.3, 0.72, 0.4]} color="#3d2414" />
+      <Block position={[2.4, 0.45, -5.6]} size={[0.45, 0.05, 0.45]} color={COLORS.woodDark} />
+      <Block position={[2.4, 0.75, -5.82]} size={[0.45, 0.5, 0.04]} color={COLORS.woodDark} />
+
+      {/* Student armchairs in rows facing the front */}
+      {cols.map((x) => rows.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} />))}
+
+      {/* Overhead fluorescent fixtures + their light */}
+      {[-3.8, -1.0, 1.8].map((x) => [-1.8, -4.2].map((z) => <FluorescentLight key={`${x}${z}`} x={x} z={z} />))}
+      <pointLight position={[-2.4, 2.8, -3]} intensity={6} color="#f4f8ff" />
+      <pointLight position={[1.8, 2.8, -2]} intensity={5} color="#f4f8ff" />
+
+      <SafetyDisplay />
+    </group>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Hardware: indoor face-recognition terminals                         */
 /* ------------------------------------------------------------------ */
 
 const BLUE = new THREE.Color(COLORS.scanBlue)
@@ -614,7 +1020,7 @@ const IDLE_SCREEN = new THREE.Color('#0c1a3a')
  * Hikvision-style terminal. Local +z is the side facing the person.
  * `beamLength` is the distance to where the student stands.
  */
-function Terminal({ id, position, rotationY = 0, beamLength = 0.8 }) {
+function Terminal({ id, position, rotationY = 0, beamLength = 0.75 }) {
   const screen = useRef()
   const beam = useRef()
   const beamMat = useRef()
@@ -652,7 +1058,6 @@ function Terminal({ id, position, rotationY = 0, beamLength = 0.8 }) {
         <planeGeometry args={[0.15, 0.2]} />
         <meshStandardMaterial ref={screen} color={IDLE_SCREEN} emissive={IDLE_SCREEN} toneMapped={false} />
       </mesh>
-      {/* Camera lens */}
       <mesh position={[0, 0.115, 0.052]}>
         <circleGeometry args={[0.012, 16]} />
         <meshBasicMaterial color="#5ec8ff" />
@@ -670,7 +1075,6 @@ function Terminal({ id, position, rotationY = 0, beamLength = 0.8 }) {
           toneMapped={false}
         />
       </mesh>
-      {/* Sweeping scan line across the face */}
       <mesh ref={sweep} visible={false} position={[0, 0, 0.05 + beamLength - 0.06]}>
         <planeGeometry args={[0.36, 0.012]} />
         <meshBasicMaterial ref={sweepMat} side={THREE.DoubleSide} toneMapped={false} />
@@ -681,7 +1085,7 @@ function Terminal({ id, position, rotationY = 0, beamLength = 0.8 }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Hardware: network & SMS cluster on the shelf above the door         */
+/* Hardware: indoor network & SMS shelf above the door                 */
 /* ------------------------------------------------------------------ */
 
 function Led({ position, color, hit, size = 0.015 }) {
@@ -698,49 +1102,55 @@ function Led({ position, color, hit, size = 0.015 }) {
 }
 
 function NetworkShelf({ showLabels }) {
-  const front = 0.415 // z of device front faces
+  const front = -0.415 // z of the device faces (facing into the room)
   return (
     <group>
-      {/* Shelf board + brackets */}
-      <Box min={[0.42, SHELF_Y - 0.04, 0.1]} max={[2.72, SHELF_Y, 0.46]} color={COLORS.wood} />
+      {/* Shelf board + brackets, mounted on the inside face of the front wall */}
+      <Box min={[0.42, SHELF_Y - 0.04, -0.46]} max={[2.72, SHELF_Y, -0.1]} color={COLORS.wood} />
       {[0.5, 2.64].map((x) => (
-        <Box key={x} min={[x - 0.015, SHELF_Y - 0.2, 0.1]} max={[x + 0.015, SHELF_Y - 0.04, 0.4]} color={COLORS.metal} />
+        <Box key={x} min={[x - 0.015, SHELF_Y - 0.2, -0.4]} max={[x + 0.015, SHELF_Y - 0.04, -0.1]} color={COLORS.metal} />
       ))}
 
-      {/* Mini PC */}
-      <Block position={DEVICES.miniPc} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
-      <Led position={[0.68, DEVICES.miniPc[1], 0.42]} color="#60a5fa" hit="miniPc" />
+      {/* DITO ZTE K10 home router: cellular internet for the Mini PC (white unit, red accent) */}
+      <Block position={DEVICES.dito} size={[0.18, 0.32, 0.18]} color="#f5f5f4" mat={{ roughness: 0.4 }} />
+      <Block position={[DEVICES.dito[0], SHELF_Y + 0.25, -0.372]} size={[0.12, 0.03, 0.005]} color="#dc2626" shadow={false} />
+      <Led position={[DEVICES.dito[0], SHELF_Y + 0.12, -0.373]} color="#ef4444" hit="dito" />
 
-      {/* Mercusys AC12G (black, 4 antennas) */}
+      {/* Mini PC: central node, linked to the cloud database */}
+      <Block position={DEVICES.miniPc} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
+      <Led position={[DEVICES.miniPc[0] - 0.07, DEVICES.miniPc[1], front - 0.005]} color="#60a5fa" hit="miniPc" />
+
+      {/* Mercusys AC12G (black router, 4 antennas): LAN connector for the Hikvision scanners */}
       <Block position={DEVICES.mercusys} size={[0.42, 0.05, 0.26]} color="#111111" mat={{ roughness: 0.3 }} />
       {[-0.18, -0.06, 0.06, 0.18].map((dx) => (
-        <Block key={dx} position={[1.28 + dx, SHELF_Y + 0.15, 0.16]} size={[0.025, 0.2, 0.012]} color="#111111" />
+        <Block key={dx} position={[DEVICES.mercusys[0] + dx, SHELF_Y + 0.15, -0.16]} size={[0.025, 0.2, 0.012]} color="#111111" />
       ))}
       {[-0.1, -0.05, 0, 0.05].map((dx) => (
-        <Led key={dx} position={[1.28 + dx, DEVICES.mercusys[1] + 0.012, front]} color="#22c55e" hit="mercusys" size={0.012} />
+        <Led
+          key={dx}
+          position={[DEVICES.mercusys[0] + dx, DEVICES.mercusys[1] + 0.012, front]}
+          color="#22c55e"
+          hit="mercusys"
+          size={0.012}
+        />
       ))}
 
-      {/* DITO ZTE K10 home router (white upright unit with red accent) */}
-      <Block position={DEVICES.dito} size={[0.18, 0.32, 0.18]} color="#f5f5f4" mat={{ roughness: 0.4 }} />
-      <Block position={[1.82, SHELF_Y + 0.25, 0.372]} size={[0.12, 0.03, 0.005]} color="#dc2626" shadow={false} />
-      <Led position={[1.82, SHELF_Y + 0.12, 0.373]} color="#ef4444" hit="dito" />
-
-      {/* ESP32 + GSM module on a small base */}
+      {/* ESP32 + attached GSM module on a small base */}
       <Block position={DEVICES.esp} size={[0.42, 0.03, 0.22]} color="#1f2937" />
-      <Block position={[2.29, SHELF_Y + 0.04, 0.3]} size={[0.2, 0.02, 0.08]} color="#1e3a8a" />
-      <Block position={[2.26, SHELF_Y + 0.055, 0.3]} size={[0.08, 0.012, 0.06]} color="#cbd5e1" mat={{ metalness: 0.8 }} />
-      <Led position={[2.36, SHELF_Y + 0.055, 0.32]} color="#3b82f6" hit="esp" size={0.012} />
-      <Block position={[2.5, SHELF_Y + 0.04, 0.3]} size={[0.12, 0.02, 0.12]} color="#b91c1c" />
-      <Led position={[2.47, SHELF_Y + 0.055, 0.34]} color="#f59e0b" hit="esp" size={0.012} />
-      <mesh position={[2.53, SHELF_Y + 0.13, 0.3]} castShadow>
+      <Block position={[2.29, SHELF_Y + 0.04, -0.3]} size={[0.2, 0.02, 0.08]} color="#1e3a8a" />
+      <Block position={[2.26, SHELF_Y + 0.055, -0.3]} size={[0.08, 0.012, 0.06]} color="#cbd5e1" mat={{ metalness: 0.8 }} />
+      <Led position={[2.36, SHELF_Y + 0.055, -0.32]} color="#3b82f6" hit="esp" size={0.012} />
+      <Block position={[2.5, SHELF_Y + 0.04, -0.3]} size={[0.12, 0.02, 0.12]} color="#b91c1c" />
+      <Led position={[2.47, SHELF_Y + 0.055, -0.34]} color="#f59e0b" hit="esp" size={0.012} />
+      <mesh position={[2.53, SHELF_Y + 0.13, -0.3]} castShadow>
         <cylinderGeometry args={[0.008, 0.008, 0.18, 8]} />
         <meshStandardMaterial color="#111" />
       </mesh>
 
-      <Label show={showLabels} side="hallway" position={[0.55, 2.82, 0.45]}>Mini PC</Label>
-      <Label show={showLabels} side="hallway" position={[1.3, 3.02, 0.3]}>Mercusys AC12G</Label>
-      <Label show={showLabels} side="hallway" position={[2.0, 3.22, 0.3]}>DITO ZTE K10</Label>
-      <Label show={showLabels} side="hallway" position={[2.6, 2.9, 0.4]}>ESP32 + GSM</Label>
+      <Label show={showLabels} side="classroom" position={[0.5, 3.12, -0.3]}>DITO ZTE K10</Label>
+      <Label show={showLabels} side="classroom" position={[1.1, 2.86, -0.45]}>Mini PC</Label>
+      <Label show={showLabels} side="classroom" position={[1.72, 3.04, -0.3]}>Mercusys AC12G</Label>
+      <Label show={showLabels} side="classroom" position={[2.6, 2.9, -0.4]}>ESP32 + GSM</Label>
     </group>
   )
 }
@@ -749,9 +1159,12 @@ function Wires() {
   const wire = { color: '#2b2b2b', lineWidth: 2.2 }
   return (
     <group>
-      <Line points={WIRES.entryWire.pts} {...wire} />
-      <Line points={WIRES.exitWire.pts} {...wire} />
+      {/* LAN cables: scanners -> Mercusys -> Mini PC */}
+      <Line points={WIRES.entryWire.pts} {...wire} color="#1e40af" />
+      <Line points={WIRES.exitWire.pts} {...wire} color="#1e40af" />
       <Line points={WIRES.lan.pts} {...wire} color="#1e40af" />
+      {/* DITO internet link + ESP32 trigger cable */}
+      <Line points={WIRES.ditoLink.pts} {...wire} color="#6d28d9" />
       <Line points={WIRES.espWire.pts} {...wire} color="#92400e" />
       <Line points={WIRES.uplink.pts} color={COLORS.cloud} lineWidth={1.5} dashed dashSize={0.08} gapSize={0.06} />
     </group>
@@ -786,14 +1199,14 @@ function Pulses() {
   )
 }
 
-/** Expanding radio rings + SMS bubble from the GSM antenna. */
-function GsmSignal() {
+/** Expanding radio rings + the official SMS bubble from the GSM antenna. */
+function GsmSignal({ smsText }) {
   const rings = [useRef(), useRef(), useRef()]
   const bubble = useRef()
   useSimFrame(({ tl, t }) => {
     const active = tl && t >= tl.sms[0] && t <= tl.sms[1]
     rings.forEach((r, i) => {
-      const local = active ? (((t - tl.sms[0]) - i * 0.33) % 1 + 1) % 1 : 0
+      const local = active ? ((((t - tl.sms[0]) - i * 0.33) % 1) + 1) % 1 : 0
       const show = active && t - tl.sms[0] >= i * 0.33
       r.current.visible = show
       if (show) {
@@ -801,7 +1214,10 @@ function GsmSignal() {
         r.current.material.opacity = 1 - local
       }
     })
-    if (bubble.current) bubble.current.style.opacity = active ? '1' : '0'
+    if (bubble.current) {
+      bubble.current.style.opacity = active ? '1' : '0'
+      bubble.current.style.transform = active ? 'scale(1)' : 'scale(0.8)'
+    }
   })
   return (
     <group position={DEVICES.gsmAntennaTip}>
@@ -813,13 +1229,14 @@ function GsmSignal() {
           </mesh>
         ))}
       </Billboard>
-      <Html position={[0.35, 0.25, 0]} center distanceFactor={8} zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <Html position={[-0.2, 0.55, -0.3]} center distanceFactor={8} zIndexRange={[12, 0]} style={{ pointerEvents: 'none' }}>
         <div
           ref={bubble}
-          className="pointer-events-none whitespace-nowrap rounded-lg bg-amber-400 px-2 py-1 text-[11px] font-semibold text-amber-950 shadow-lg transition-opacity duration-300"
+          className="pointer-events-none w-56 rounded-xl bg-amber-400 px-3 py-2 text-[11px] leading-snug text-amber-950 shadow-xl transition duration-300"
           style={{ opacity: 0 }}
         >
-          ✉ SMS → Parent (DITO)
+          <p className="text-[9px] font-bold uppercase tracking-wider">SMS · GSM module → Parent (DITO)</p>
+          <p className="mt-0.5 font-semibold">{smsText}</p>
         </div>
       </Html>
     </group>
@@ -830,13 +1247,13 @@ function CloudNode({ showLabels }) {
   const group = useRef()
   const mats = useRef([])
   const puffs = [
-    [0, 0, 0, 0.22],
-    [0.22, -0.04, 0, 0.17],
-    [-0.22, -0.05, 0, 0.16],
-    [0.08, 0.13, 0, 0.16],
+    [0, 0, 0, 0.3],
+    [0.3, -0.05, 0, 0.23],
+    [-0.3, -0.07, 0, 0.22],
+    [0.1, 0.18, 0, 0.22],
   ]
   useSimFrame(({ tl, t, state }) => {
-    group.current.position.y = DEVICES.cloud[1] + Math.sin(state.clock.elapsedTime * 1.2) * 0.05
+    group.current.position.y = DEVICES.cloud[1] + Math.sin(state.clock.elapsedTime * 1.2) * 0.06
     const f = flash(t, tl?.hits?.cloud)
     mats.current.forEach((m) => m && (m.emissiveIntensity = 0.15 + f * 2.5))
   })
@@ -848,13 +1265,13 @@ function CloudNode({ showLabels }) {
           <meshStandardMaterial ref={(m) => (mats.current[i] = m)} color="#ffffff" emissive={COLORS.cloud} emissiveIntensity={0.15} />
         </mesh>
       ))}
-      <Label show={showLabels} position={[0, 0.42, 0]}>Cloud Database</Label>
+      <Label show={showLabels} position={[0, 0.55, 0]}>Cloud Database</Label>
     </group>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Grade 10 student                                                    */
+/* Grade 10 student (world coordinates)                                */
 /* ------------------------------------------------------------------ */
 
 const SKIN = '#c68c5a'
@@ -878,6 +1295,7 @@ function Arm({ x, limbRef }) {
 }
 
 function Student({ showLabels }) {
+  const sim = useContext(SimContext)
   const root = useRef()
   const legL = useRef()
   const legR = useRef()
@@ -890,15 +1308,15 @@ function Student({ showLabels }) {
     let moving = false
     let target = null
     if (tl) {
-      const walk = tl.walks.find((w) => t >= w.from && t <= w.to)
-      if (walk) {
-        const seg = samplePath(walk.path, smooth(progress(t, [walk.from, walk.to])), tmp)
+      const w = tl.walks.find((wk) => t >= wk.from && t <= wk.to)
+      if (w) {
+        const seg = samplePath(w.path, progress(t, [w.from, w.to]), tmp)
         root.current.position.copy(tmp)
-        const d = walk.path.dirs[seg]
-        target = Math.atan2(d.x, d.z)
+        const d = w.path.dirs[seg]
+        if (d.x || d.z) target = Math.atan2(d.x, d.z)
         moving = true
       } else {
-        const prev = [...tl.walks].reverse().find((w) => t > w.to)
+        const prev = [...tl.walks].reverse().find((wk) => t > wk.to)
         if (prev) {
           root.current.position.copy(prev.path.pts[prev.path.pts.length - 1])
           target = prev.face ?? null
@@ -907,6 +1325,7 @@ function Student({ showLabels }) {
         }
       }
     }
+    sim.current.studentPos.copy(root.current.position)
     if (target != null) {
       const cur = root.current.rotation.y
       const diff = Math.atan2(Math.sin(target - cur), Math.cos(target - cur))
@@ -922,7 +1341,7 @@ function Student({ showLabels }) {
   })
 
   return (
-    <group ref={root} position={HALLWAY_REST} rotation={HALLWAY_REST_ROT}>
+    <group ref={root} position={COURTYARD_START} rotation={COURTYARD_ROT}>
       <group ref={body}>
         <Leg x={-0.08} limbRef={legL} />
         <Leg x={0.08} limbRef={legR} />
@@ -932,7 +1351,6 @@ function Student({ showLabels }) {
         <Block position={[0, 1.0, 0.115]} size={[0.07, 0.09, 0.006]} color="#ffffff" shadow={false} />
         <Arm x={-0.245} limbRef={armL} />
         <Arm x={0.245} limbRef={armR} />
-        {/* Head + hair */}
         <Block position={[0, 1.39, 0]} size={[0.08, 0.06, 0.08]} color={SKIN} />
         <mesh position={[0, 1.52, 0]} castShadow>
           <sphereGeometry args={[0.13, 24, 24]} />
@@ -942,7 +1360,6 @@ function Student({ showLabels }) {
           <sphereGeometry args={[0.13, 24, 24]} />
           <meshStandardMaterial color="#141414" />
         </mesh>
-        {/* Backpack */}
         <Block position={[0, 1.1, -0.17]} size={[0.3, 0.38, 0.12]} color="#2563eb" />
       </group>
       <Label show={showLabels} position={[0, 1.9, 0]} tone="light">
@@ -953,60 +1370,16 @@ function Student({ showLabels }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Scene                                                               */
+/* Camera rig                                                          */
 /* ------------------------------------------------------------------ */
-
-function Scene({ showLabels, viewRequest, autoFollow }) {
-  return (
-    <>
-      <color attach="background" args={['#dfe7ef']} />
-      <hemisphereLight args={['#ffffff', '#d6cfc0', 0.8]} />
-      <ambientLight intensity={0.25} />
-      <directionalLight
-        position={[6, 10, 7]}
-        intensity={1.6}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-10}
-        shadow-camera-right={10}
-        shadow-camera-top={10}
-        shadow-camera-bottom={-10}
-        shadow-bias={-0.0005}
-      />
-
-      <Floor />
-      <DividingWall />
-      <Door />
-      <RoomSign />
-      <WindowWithGrilles />
-      <Classroom />
-      <HallwayRailing />
-
-      {/* Entry terminal: hallway wall, between the window and the door */}
-      <Terminal id="entry" position={[0.6, 1.45, 0.1]} beamLength={0.8} />
-      {/* Exit terminal: inside wall of the classroom, faces into the room */}
-      <Terminal id="exit" position={[2.9, 1.45, -0.1]} rotationY={Math.PI} beamLength={0.75} />
-      <Label show={showLabels} side="hallway" position={[0.35, 1.78, 0.25]}>Entry Terminal (Hikvision)</Label>
-      <Label show={showLabels} side="classroom" position={[2.9, 1.78, -0.25]}>Exit Terminal (Hikvision)</Label>
-
-      <NetworkShelf showLabels={showLabels} />
-      <Wires />
-      <Pulses />
-      <GsmSignal />
-      <CloudNode showLabels={showLabels} />
-      <Student showLabels={showLabels} />
-
-      <CameraRig viewRequest={viewRequest} autoFollow={autoFollow} />
-    </>
-  )
-}
 
 /**
  * Orbit controls + smooth camera transitions between VIEWS.
- * A manual view request or the active timeline's `cameras` cues set the goal;
- * dragging the scene cancels an in-progress transition.
+ * Manual preset buttons or the active timeline's `cameras` cues set the goal.
+ * The `follow` goal tracks the student every frame. Dragging cancels a transition.
  */
 function CameraRig({ viewRequest, autoFollow }) {
+  const sim = useContext(SimContext)
   const camera = useThree((s) => s.camera)
   const controls = useRef()
   const goal = useRef({ key: 'hallway', moving: false })
@@ -1015,11 +1388,13 @@ function CameraRig({ viewRequest, autoFollow }) {
 
   const setGoal = (key) => {
     goal.current = { key, moving: true }
-    goalPos.set(...VIEWS[key].pos)
-    goalTarget.set(...VIEWS[key].target)
+    if (key !== 'follow') {
+      goalPos.set(...VIEWS[key].pos)
+      goalTarget.set(...VIEWS[key].target)
+    }
   }
 
-  // React to manual preset buttons (n changes on every click).
+  // Manual preset buttons (n changes on every click).
   const lastRequest = useRef(viewRequest.n)
   if (lastRequest.current !== viewRequest.n) {
     lastRequest.current = viewRequest.n
@@ -1039,10 +1414,18 @@ function CameraRig({ viewRequest, autoFollow }) {
     }
     const c = controls.current
     if (!goal.current.moving || !c) return
+    if (goal.current.key === 'follow') {
+      goalPos.copy(sim.current.studentPos).add(FOLLOW_OFFSET)
+      goalTarget.copy(sim.current.studentPos).y += 1.2
+    }
     const k = 1 - Math.exp(-dt * 2.5)
     camera.position.lerp(goalPos, k)
     c.target.lerp(goalTarget, k)
-    if (camera.position.distanceTo(goalPos) < 0.02 && c.target.distanceTo(goalTarget) < 0.02) {
+    if (
+      goal.current.key !== 'follow' &&
+      camera.position.distanceTo(goalPos) < 0.02 &&
+      c.target.distanceTo(goalTarget) < 0.02
+    ) {
       goal.current.moving = false
     }
   })
@@ -1053,11 +1436,63 @@ function CameraRig({ viewRequest, autoFollow }) {
       makeDefault
       target={VIEWS.hallway.target}
       maxPolarAngle={Math.PI / 2.05}
-      minDistance={3}
-      maxDistance={24}
+      minDistance={1.5}
+      maxDistance={70}
       enableDamping
       onStart={() => (goal.current.moving = false)}
     />
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Scene                                                               */
+/* ------------------------------------------------------------------ */
+
+function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
+  return (
+    <>
+      <color attach="background" args={['#dbe6f0']} />
+      <hemisphereLight args={['#ffffff', '#d6cfc0', 0.85]} />
+      <ambientLight intensity={0.25} />
+      <directionalLight
+        position={[14, 30, 24]}
+        intensity={1.6}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-30}
+        shadow-camera-right={30}
+        shadow-camera-top={30}
+        shadow-camera-bottom={-30}
+        shadow-camera-far={90}
+        shadow-bias={-0.0004}
+      />
+
+      {/* Building B: 3 stories, 3 classrooms each, stairwell beside Room 301 */}
+      <Courtyard />
+      {FLOORS.map((f) => (
+        <FloorLevel key={f.level} {...f} showLabels={showLabels} />
+      ))}
+      <Staircase showLabels={showLabels} />
+      <Roof />
+
+      {/* Room B 301 interior + all hardware (room-local coordinates) */}
+      <group position={[0, TOP_Y, 0]}>
+        <Room301Interior />
+        {/* Indoor entry terminal: left of the door frame. Indoor exit terminal: right of it. */}
+        <Terminal id="entry" position={[0.7, 1.45, -0.1]} rotationY={Math.PI} />
+        <Terminal id="exit" position={[2.6, 1.45, -0.1]} rotationY={Math.PI} />
+        <Label show={showLabels} side="classroom" position={[0.55, 1.8, -0.3]}>Entry Terminal (Hikvision)</Label>
+        <Label show={showLabels} side="classroom" position={[2.75, 1.8, -0.3]}>Exit Terminal (Hikvision)</Label>
+        <NetworkShelf showLabels={showLabels} />
+        <Wires />
+        <Pulses />
+        <GsmSignal smsText={smsText} />
+        <CloudNode showLabels={showLabels} />
+      </group>
+
+      <Student showLabels={showLabels} />
+      <CameraRig viewRequest={viewRequest} autoFollow={autoFollow} />
+    </>
   )
 }
 
@@ -1072,21 +1507,16 @@ const TONE_STYLES = {
   ok: 'bg-emerald-500 text-emerald-950',
 }
 
-function Dashboard({ mode, reached, smsTime }) {
+function Dashboard({ mode, reached, smsText }) {
   const tl = mode ? TIMELINES[mode] : null
   const status = tl ? [...tl.status].reverse().find((s) => s.at <= reached) : null
   const tone = status?.tone ?? 'standby'
   const smsRevealed = tl?.logs.some((l) => l.sms && l.at <= reached)
-  const verb = mode === 'exit' ? 'EXITED' : 'ENTERED'
 
   return (
-    <div className="pointer-events-auto absolute left-3 top-3 z-20 w-[23rem] max-w-[calc(100vw-1.5rem)] rounded-2xl border border-white/10 bg-slate-900/85 p-4 text-white shadow-2xl backdrop-blur-md">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">
-        Bantay · Smart Student Monitoring
-      </p>
-      <h1 className="mt-1 text-sm font-bold leading-snug">
-        Claro M. Recto High School - Grade 10 Diamond (Room B 301)
-      </h1>
+    <div className="pointer-events-auto absolute left-3 top-3 z-20 max-h-[calc(100vh-7rem)] w-[23rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/85 p-4 text-white shadow-2xl backdrop-blur-md">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Bantay · Smart Student Monitoring</p>
+      <h1 className="mt-1 text-sm font-bold leading-snug">Claro M. Recto High School - Grade 10 Diamond (Room B 301)</h1>
 
       <div className="mt-3 flex items-center gap-3 rounded-xl bg-white/5 p-2.5">
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">
@@ -1104,9 +1534,9 @@ function Dashboard({ mode, reached, smsTime }) {
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between text-xs">
+      <div className="mt-3 flex items-center justify-between gap-2 text-xs">
         <span className="text-slate-400">Status</span>
-        <span className={`rounded-full px-2.5 py-1 font-semibold ${TONE_STYLES[tone]}`}>
+        <span className={`rounded-full px-2.5 py-1 text-right font-semibold ${TONE_STYLES[tone]}`}>
           {status?.text ?? 'Standby – choose a simulation'}
         </span>
       </div>
@@ -1122,9 +1552,7 @@ function Dashboard({ mode, reached, smsTime }) {
                   done ? 'bg-emerald-500/15 text-white' : 'bg-white/5 text-slate-500'
                 }`}
               >
-                <span className={`w-4 shrink-0 text-center ${done ? 'text-emerald-300' : ''}`}>
-                  {done ? log.icon : '•'}
-                </span>
+                <span className={`w-4 shrink-0 text-center ${done ? 'text-emerald-300' : ''}`}>{done ? log.icon : '•'}</span>
                 <span>{log.text}</span>
               </li>
             )
@@ -1135,16 +1563,14 @@ function Dashboard({ mode, reached, smsTime }) {
       {smsRevealed && (
         <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-400/10 p-2.5 text-xs">
           <p className="text-[10px] uppercase tracking-wider text-amber-300">SMS preview · to Parent/Guardian</p>
-          <p className="mt-1 text-amber-50">
-            CMRHS ALERT: {MOCK_STUDENT.name} (Gr. 10 Diamond) has {verb} Room B 301 at {smsTime}.
-          </p>
+          <p className="mt-1 text-amber-50">{smsText}</p>
         </div>
       )}
 
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-slate-400">
         {[
           ['bg-sky-400', 'LAN data'],
-          ['bg-violet-400', 'Cloud uplink'],
+          ['bg-violet-400', 'Cloud link (internet via DITO)'],
           ['bg-amber-400', 'SMS trigger'],
         ].map(([dot, text]) => (
           <span key={text} className="flex items-center gap-1.5">
@@ -1157,20 +1583,9 @@ function Dashboard({ mode, reached, smsTime }) {
   )
 }
 
-function Controls({
-  running,
-  location,
-  onEntry,
-  onExit,
-  showLabels,
-  onToggleLabels,
-  onView,
-  autoFollow,
-  onToggleAuto,
-}) {
+function Controls({ running, location, onEntry, onExit, showLabels, onToggleLabels, onView, autoFollow, onToggleAuto }) {
+  const base = 'rounded-xl px-5 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40'
   const small = 'rounded-lg px-3 py-1.5 text-xs font-medium shadow transition'
-  const base =
-    'rounded-xl px-5 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40'
   return (
     <>
       <div className="pointer-events-auto absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
@@ -1178,7 +1593,7 @@ function Controls({
           <button
             type="button"
             onClick={onEntry}
-            disabled={running || location !== 'hallway'}
+            disabled={running || location !== 'courtyard'}
             className={`${base} bg-emerald-500 text-emerald-950 hover:bg-emerald-400`}
           >
             Simulate Entry
@@ -1195,20 +1610,15 @@ function Controls({
         <p className="rounded-full bg-slate-900/70 px-3 py-1 text-[11px] text-slate-200">
           {running
             ? 'Simulation running…'
-            : location === 'hallway'
-              ? 'Student is in the hallway. Run the entry simulation.'
+            : location === 'courtyard'
+              ? 'Student is in the ground-floor courtyard. Run the entry simulation.'
               : 'Student is inside Room B 301. Run the exit simulation.'}
         </p>
       </div>
       <div className="pointer-events-auto absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
         <div className="flex gap-1.5 rounded-xl bg-slate-900/70 p-1.5">
           {Object.entries(VIEWS).map(([key, v]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onView(key)}
-              className={`${small} bg-white/10 text-white hover:bg-white/20`}
-            >
+            <button key={key} type="button" onClick={() => onView(key)} className={`${small} bg-white/10 text-white hover:bg-white/20`}>
               {v.label}
             </button>
           ))}
@@ -1222,16 +1632,14 @@ function Controls({
           >
             Auto camera: {autoFollow ? 'On' : 'Off'}
           </button>
-          <button
-            type="button"
-            onClick={onToggleLabels}
-            className={`${small} bg-slate-900/80 text-white hover:bg-slate-800`}
-          >
+          <button type="button" onClick={onToggleLabels} className={`${small} bg-slate-900/80 text-white hover:bg-slate-800`}>
             {showLabels ? 'Hide labels' : 'Show labels'}
           </button>
         </div>
-        <p className="hidden rounded-lg bg-slate-900/60 px-2 py-1 text-[10px] text-slate-200 sm:block">
+        <p className="hidden rounded-lg bg-slate-900/60 px-2 py-1 text-right text-[10px] text-slate-200 sm:block">
           Drag to orbit · Scroll to zoom · Right-drag to pan
+          <br />
+          The roof hides automatically when viewed from above
         </p>
       </div>
     </>
@@ -1243,30 +1651,31 @@ function Controls({
 /* ------------------------------------------------------------------ */
 
 export default function App() {
-  const sim = useRef({ mode: null, start: 0, location: 'hallway' })
+  const sim = useRef({ mode: null, start: 0, location: 'courtyard', studentPos: new THREE.Vector3(...COURTYARD_START) })
   const [mode, setMode] = useState(null) // mode of the current / last simulation
   const [running, setRunning] = useState(false)
-  const [location, setLocation] = useState('hallway')
+  const [location, setLocation] = useState('courtyard')
   const [reached, setReached] = useState(0)
-  const [smsTime, setSmsTime] = useState('')
+  const [smsText, setSmsText] = useState('')
   const [showLabels, setShowLabels] = useState(true)
   const [autoFollow, setAutoFollow] = useState(true)
   const [viewRequest, setViewRequest] = useState({ key: 'hallway', n: 0 })
 
   const start = (next) => {
     if (running) return
-    sim.current = { ...sim.current, mode: next, start: now() }
+    sim.current.mode = next
+    sim.current.start = now()
     setMode(next)
     setRunning(true)
     setReached(0)
-    setSmsTime(new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }))
+    setSmsText(smsMessage(next, manilaStamp()))
   }
 
   return (
     <SimContext.Provider value={sim}>
       <div className="relative h-screen w-full overflow-hidden bg-slate-200 font-sans">
-        <Canvas shadows dpr={[1, 2]} camera={{ position: [7.5, 6, 9], fov: 45 }}>
-          <Scene showLabels={showLabels} viewRequest={viewRequest} autoFollow={autoFollow} />
+        <Canvas shadows dpr={[1, 2]} camera={{ position: VIEWS.hallway.pos, fov: 45, near: 0.1, far: 300 }}>
+          <Scene showLabels={showLabels} viewRequest={viewRequest} autoFollow={autoFollow} smsText={smsText} />
           <Director
             onReach={setReached}
             onDone={(loc) => {
@@ -1277,7 +1686,7 @@ export default function App() {
           />
         </Canvas>
         <div className="pointer-events-none absolute inset-0">
-          <Dashboard mode={mode} reached={reached} smsTime={smsTime} />
+          <Dashboard mode={mode} reached={reached} smsText={smsText} />
           <Controls
             running={running}
             location={location}

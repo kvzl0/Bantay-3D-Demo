@@ -2,7 +2,19 @@
 
 Interactive 3D demo for the capstone project **"A Cloud-based Smart Student Monitoring System with Performance Tracking and Alert System for Claro M. Recto High School"**.
 
-It recreates the 2nd-floor hallway and Room B 301 (Grade 10 Diamond) and animates the full entry/exit flow: face scan at the Hikvision terminal, door swing, student movement, and the data path through the Mini PC, Mercusys AC12G, DITO ZTE K10, the cloud database, and the ESP32 + GSM module that sends the parent SMS.
+It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase beside Room B 301 (Grade 10 Diamond) leads up to the open-air top-floor hallway. The demo animates the full entry/exit flow: the student climbs the stairs, gets a face scan at an indoor Hikvision terminal, the door swings, and the data travels through the network cluster on the shelf inside the room until the parent SMS is sent.
+
+### Network topology (all inside Room B 301)
+
+| From | To | Purpose |
+| --- | --- | --- |
+| Entry / Exit Hikvision terminals | Mercusys AC12G (black router) | Local LAN connection for the scanners |
+| Mercusys AC12G | Mini PC | Scan data into the central node |
+| DITO ZTE K10 | Mini PC | Cellular internet access |
+| Mini PC | Cloud database | Attendance / exit log |
+| Mini PC | ESP32 + GSM module | Trigger for the parent SMS |
+
+SMS wording: `Bantay: Juan Dela Cruz checked in at [time] on [date] (Manila Time)`. Exit messages use `checked out`. The time and date use the `Asia/Manila` time zone.
 
 **Author:** Kiev Gonzales ([@kvzl0](https://github.com/kvzl0))
 
@@ -30,10 +42,10 @@ The whole demo lives in [`src/App.jsx`](src/App.jsx) and default-exports `App`. 
 
 ## How to use the demo
 
-- **Simulate Entry** (student in the hallway): walk to the hallway terminal, blue scan turns green, the door swings inward, the student walks in, a data pulse goes to the Mini PC and DITO router and up to the cloud, and a second pulse triggers the ESP32 + GSM module (SMS rings).
-- **Simulate Exit** (student in the room): scan at the interior terminal, the door swings outward, the student returns to the hallway, and the cloud log and ESP32 + GSM exit SMS fire.
+- **Simulate Entry** (student starts in the ground-floor courtyard): the student climbs the stairs to the top-floor hallway and walks to Room B 301. The door swings inward, the student steps in to the indoor entry terminal, and the scan turns from blue to green. Pulses then run scanner → Mercusys → Mini PC → cloud, and Mini PC → ESP32 + GSM, which shows the official SMS bubble.
+- **Simulate Exit** (student in the room): the student scans at the indoor exit terminal, the door swings outward, and the student walks out to the hallway and back down the stairs. The exit SMS goes out through the same network path.
 - The buttons are enabled based on where the student currently is.
-- Camera presets (Hallway / Classroom / Overview), an **Auto camera** toggle that follows the action, and a label toggle are at the top right. Drag to orbit, scroll to zoom.
+- Camera presets (Hallway / Classroom / Overview), an **Auto camera** toggle that follows the student, and a label toggle are at the top right. Drag to orbit, scroll to zoom. The roof hides automatically when the camera is above it.
 
 The student name and LRN are mock data (`MOCK_STUDENT` at the top of `src/App.jsx`). Timings for every step are in the `RAW_TIMELINES` object in the same file.
 
