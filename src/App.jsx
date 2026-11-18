@@ -753,22 +753,44 @@ function RoomFront({ number, detailed }) {
   )
 }
 
-/** Green metal grid railing ("harang") from the left stair landing past every classroom. */
-function HallwayRailing() {
-  const z = HALL_Z - 0.06
-  const x1 = STAIR.x1
-  const x2 = BUILDING.x2
-  const posts = []
-  for (let x = x1; x <= x2 + 0.01; x += 2) posts.push(x)
+const PARAPET_H = 1.0 // solid waist-level wall
+const GRILLE_H = 1.0 // green grid grille on top of it
+const PARAPET_T = 0.15 // wall thickness
+
+/**
+ * Exterior hallway barrier ("harang"): a solid waist-level concrete wall painted
+ * pale yellow with a dark brown lower border, with the green metal grid grille
+ * mounted on top. Built along local +x from 0 to `length`, centred on z = 0.
+ */
+function HallwayBarrier({ length }) {
+  const L = length
+  const t = PARAPET_T / 2
+  const gy = PARAPET_H + 0.05 // grille base (on top of the coping)
   const metal = { metalness: 0.5, roughness: 0.4 }
+  const posts = []
+  for (let x = 0; x <= L + 0.01; x += 2) posts.push(Math.min(x, L - 0.025))
   return (
     <group>
-      <Box min={[x1, 0, z - 0.08]} max={[x2, 0.12, z + 0.06]} color={COLORS.slab} shadow={false} />
-      <Box min={[x1, 0.98, z - 0.03]} max={[x2, 1.04, z + 0.03]} color={COLORS.railing} mat={metal} shadow={false} />
+      {/* Solid waist-level wall, coping and dark brown lower border (both faces) */}
+      <Box min={[0, 0, -t]} max={[L, PARAPET_H, t]} color={COLORS.wall} />
+      <Box min={[0, PARAPET_H, -t - 0.015]} max={[L, gy, t + 0.015]} color={COLORS.slab} />
+      <Box min={[0, 0, -t - 0.02]} max={[L, 0.25, t + 0.02]} color={COLORS.baseboard} shadow={false} />
+      {/* Green metal grid grille mounted on top */}
+      <GridPanel position={[L / 2, gy + GRILLE_H / 2, 0]} width={L} height={GRILLE_H} color={COLORS.railing} cell={0.15} />
+      <Box min={[0, gy + GRILLE_H, -0.025]} max={[L, gy + GRILLE_H + 0.05, 0.025]} color={COLORS.railing} mat={metal} shadow={false} />
+      <Box min={[0, gy, -0.02]} max={[L, gy + 0.04, 0.02]} color={COLORS.railing} mat={metal} shadow={false} />
       {posts.map((x) => (
-        <Block key={x} position={[x, 0.55, z]} size={[0.05, 0.86, 0.05]} color={COLORS.railing} mat={metal} shadow={false} />
+        <Block key={x} position={[x, gy + GRILLE_H / 2, 0]} size={[0.05, GRILLE_H, 0.05]} color={COLORS.railing} mat={metal} shadow={false} />
       ))}
-      <GridPanel position={[(x1 + x2) / 2, 0.55, z]} width={x2 - x1} height={0.86} color={COLORS.railing} cell={0.15} />
+    </group>
+  )
+}
+
+/** Barrier along the open hallway edge, from the left stair landing past every classroom. */
+function HallwayRailing() {
+  return (
+    <group position={[STAIR.x1, 0, HALL_Z - PARAPET_T / 2]}>
+      <HallwayBarrier length={BUILDING.x2 - STAIR.x1} />
     </group>
   )
 }
@@ -874,17 +896,12 @@ function Staircase({ showLabels }) {
       {/* Stairwell back wall */}
       <Box min={[STAIR.x1, 0, -4.4]} max={[STAIR.x2, ROOF_TOP - 0.2, -4.3]} color={COLORS.wall} />
       <Box min={[STAIR.x1, 0, -4.3]} max={[STAIR.x2, 0.3, -4.26]} color={COLORS.baseboard} />
-      {/* Green grid railings on the upper landings' open side */}
+      {/* Same waist wall + green grille on the upper landings' open left side
+          (rotated so local +x runs from the hallway edge back toward z = 0.1) */}
       {[STORY, TOP_Y].map((y) => (
-        <GridPanel
-          key={y}
-          position={[STAIR.x1 + 0.04, y + 0.55, (0.1 + HALL_Z) / 2]}
-          width={HALL_Z - 0.1}
-          height={0.86}
-          color={COLORS.railing}
-          cell={0.15}
-          rotY={Math.PI / 2}
-        />
+        <group key={y} position={[STAIR.x1 + PARAPET_T / 2, y, HALL_Z - PARAPET_T]} rotation={[0, Math.PI / 2, 0]}>
+          <HallwayBarrier length={HALL_Z - PARAPET_T - 0.1} />
+        </group>
       ))}
       <Label show={showLabels} side="hallway" position={[(STAIR.x1 + STAIR.x2) / 2, TOP_Y + 2.4, 1.6]}>
         Stair landing · Top floor
@@ -957,31 +974,142 @@ function SafetyDisplay() {
     fg: '#ffffff',
   })
   const wx = ROOM.x2 - 0.05 // inner face of the right side wall (partition to Room 302), near the door
+  const rows = [0.95, 1.33, 1.71, 2.09] // shelf tops: 4 clean rows
+  const cols = [-2.3, -1.85, -1.4, -0.95]
+  const [z1, z2] = [-2.55, -0.75]
   return (
     <group>
-      {/* Wall rack with orange hard hats */}
-      <Box min={[wx - 0.28, 1.56, -2.8]} max={[wx, 1.6, -0.9]} color={COLORS.wood} />
-      {[-2.8, -0.9].map((z) => (
-        <Box key={z} min={[wx - 0.25, 1.36, z === -2.8 ? z : z - 0.03]} max={[wx, 1.56, z === -2.8 ? z + 0.03 : z]} color={COLORS.woodDark} />
+      {/* Wall-mounted rack: two uprights + 4 shelves, each holding 4 orange safety helmets */}
+      {[z1, z2 - 0.03].map((z) => (
+        <Box key={z} min={[wx - 0.32, 0.75, z]} max={[wx, 2.35, z + 0.03]} color={COLORS.woodDark} />
       ))}
-      {[-2.5, -2.05, -1.6, -1.15].map((z) => (
-        <HardHat key={z} position={[wx - 0.15, 1.6, z]} />
+      <Box min={[wx - 0.02, 0.75, z1]} max={[wx, 2.35, z2]} color={COLORS.wood} shadow={false} />
+      {rows.map((y) => (
+        <group key={y}>
+          <Box min={[wx - 0.32, y - 0.035, z1]} max={[wx, y, z2]} color={COLORS.wood} />
+          {cols.map((z) => (
+            <HardHat key={z} position={[wx - 0.17, y, z]} />
+          ))}
+        </group>
       ))}
-      <mesh position={[wx - 0.005, 2.05, -1.85]} rotation={[0, -Math.PI / 2, 0]}>
+      <mesh position={[wx - 0.005, 2.55, (z1 + z2) / 2]} rotation={[0, -Math.PI / 2, 0]}>
         <planeGeometry args={[1.2, 0.22]} />
         <meshBasicMaterial map={sign} toneMapped={false} />
       </mesh>
-      {/* Fire extinguisher on a bracket */}
-      <mesh position={[wx - 0.12, 0.95, -3.3]} castShadow>
-        <cylinderGeometry args={[0.08, 0.08, 0.5, 16]} />
-        <meshStandardMaterial color="#dc2626" roughness={0.35} />
-      </mesh>
-      <Block position={[wx - 0.12, 1.25, -3.3]} size={[0.06, 0.1, 0.06]} color="#111" />
     </group>
   )
 }
 
-function Room301Interior() {
+/** Red fire extinguisher on a wall bracket with a sign. Local +z faces away from the wall. */
+function FireExtinguisher({ position }) {
+  const sign = useTextTexture('FIRE EXTINGUISHER', {
+    w: 512,
+    h: 96,
+    font: 'bold 46px Arial, Helvetica, sans-serif',
+    bg: '#dc2626',
+    fg: '#ffffff',
+  })
+  return (
+    <group position={position}>
+      <Block position={[0, 0.98, 0.03]} size={[0.14, 0.06, 0.06]} color="#111" />
+      <mesh position={[0, 0.7, 0.1]} castShadow>
+        <cylinderGeometry args={[0.08, 0.08, 0.5, 20]} />
+        <meshStandardMaterial color="#dc2626" roughness={0.35} />
+      </mesh>
+      <mesh position={[0, 0.99, 0.1]}>
+        <cylinderGeometry args={[0.03, 0.04, 0.08, 12]} />
+        <meshStandardMaterial color="#1f2937" metalness={0.6} />
+      </mesh>
+      <Block position={[0.06, 1.01, 0.13]} size={[0.1, 0.015, 0.02]} color="#111" shadow={false} />
+      <mesh position={[0, 1.25, 0.006]}>
+        <planeGeometry args={[0.42, 0.08]} />
+        <meshBasicMaterial map={sign} toneMapped={false} />
+      </mesh>
+    </group>
+  )
+}
+
+/**
+ * Electric wall fan (bracket, motor, guard, spinning blades).
+ * Local +z points away from the wall; the head tilts down toward the room.
+ */
+function WallFan({ position, rotY }) {
+  const blades = useRef()
+  useFrame((_, dt) => {
+    blades.current.rotation.z += dt * 14
+  })
+  return (
+    <group position={position} rotation={[0, rotY, 0]}>
+      <Block position={[0, 0, 0.03]} size={[0.14, 0.14, 0.06]} color="#e5e7eb" />
+      <Block position={[0, -0.02, 0.12]} size={[0.04, 0.04, 0.14]} color="#d1d5db" shadow={false} />
+      <group position={[0, -0.04, 0.2]} rotation={[0.35, 0, 0]}>
+        <mesh position={[0, 0, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <cylinderGeometry args={[0.065, 0.075, 0.14, 20]} />
+          <meshStandardMaterial color="#f3f4f6" roughness={0.4} />
+        </mesh>
+        <group position={[0, 0, 0.15]}>
+          <mesh>
+            <torusGeometry args={[0.21, 0.008, 8, 40]} />
+            <meshStandardMaterial color="#9ca3af" metalness={0.5} />
+          </mesh>
+          <mesh position={[0, 0, 0.012]}>
+            <circleGeometry args={[0.21, 32]} />
+            <meshStandardMaterial color="#cbd5e1" transparent opacity={0.25} side={THREE.DoubleSide} depthWrite={false} />
+          </mesh>
+          <group ref={blades}>
+            {[0, 1, 2].map((i) => (
+              <group key={i} rotation={[0, 0, (i * 2 * Math.PI) / 3]}>
+                <mesh position={[0, 0.1, 0]}>
+                  <boxGeometry args={[0.07, 0.17, 0.005]} />
+                  <meshStandardMaterial color="#60a5fa" transparent opacity={0.85} />
+                </mesh>
+              </group>
+            ))}
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.03, 0.03, 0.03, 12]} />
+              <meshStandardMaterial color="#e5e7eb" />
+            </mesh>
+          </group>
+        </group>
+      </group>
+    </group>
+  )
+}
+
+/**
+ * Power extension strip near the base of the equipment wall (inside, left of the door),
+ * plugged into a wall outlet, with the cord running up to the network shelf.
+ */
+function PowerExtension({ showLabels }) {
+  const z = -0.1 // inner face of the front wall
+  return (
+    <group>
+      {/* Wall outlet plate */}
+      <Block position={[0.25, 0.42, z - 0.006]} size={[0.08, 0.12, 0.012]} color="#f5f5f4" shadow={false} />
+      <Block position={[0.25, 0.42, z - 0.013]} size={[0.03, 0.05, 0.004]} color="#374151" shadow={false} />
+      {/* Extension strip with 4 sockets and a lit switch */}
+      <Block position={[0.72, 0.45, z - 0.03]} size={[0.42, 0.06, 0.06]} color="#fafafa" />
+      {[-0.13, -0.05, 0.03, 0.11].map((dx) => (
+        <Block key={dx} position={[0.72 + dx, 0.45, z - 0.061]} size={[0.045, 0.035, 0.004]} color="#1f2937" shadow={false} />
+      ))}
+      <Block
+        position={[0.9, 0.45, z - 0.061]}
+        size={[0.03, 0.025, 0.006]}
+        color="#f97316"
+        mat={{ emissive: '#f97316', emissiveIntensity: 1.2 }}
+        shadow={false}
+      />
+      {/* Cords: outlet -> strip, strip -> shelf */}
+      <Line points={[[0.25, 0.4, z - 0.02], [0.4, 0.38, z - 0.02], [0.5, 0.44, z - 0.03]]} color="#e5e7eb" lineWidth={2} />
+      <Line points={[[0.55, 0.47, z - 0.04], [0.48, 0.6, z - 0.02], [0.48, 2.56, z - 0.02], [0.6, 2.62, z - 0.2]]} color="#9ca3af" lineWidth={2} />
+      <Label show={showLabels} side="classroom" position={[0.72, 0.7, -0.3]}>
+        Power extension
+      </Label>
+    </group>
+  )
+}
+
+function Room301Interior({ showLabels }) {
   const D = -ROOM.depth
   const cols = [-4.8, -3.7, -2.6, -1.5, -0.4]
   const rows = [-1.7, -2.6, -3.5, -4.4]
@@ -992,19 +1120,24 @@ function Room301Interior() {
       <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
       <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} />
 
-      {/* Front of the room: green chalkboard flanked by whiteboards */}
+      {/* Front wall (solid, opposite the windows) holds ALL boards:
+          mini-whiteboard | main green chalkboard | whiteboard. The window wall has none. */}
       <Box min={[-4.5, 0.95, D]} max={[-0.7, 2.35, D + 0.03]} color="#5a3a1e" />
       <Box min={[-4.4, 1.0, D + 0.03]} max={[-0.8, 2.3, D + 0.05]} color="#1f4d34" mat={{ roughness: 0.95 }} />
       <Box min={[-4.4, 0.92, D + 0.03]} max={[-0.8, 0.95, D + 0.12]} color="#5a3a1e" />
       {[
-        [-5.8, -4.8],
-        [-0.3, 2.1],
-      ].map(([a, b]) => (
+        { a: -5.6, b: -4.85, y1: 1.3, y2: 2.0 }, // mini-whiteboard
+        { a: -0.3, b: 2.1, y1: 1.0, y2: 2.2 }, // whiteboard
+      ].map(({ a, b, y1, y2 }) => (
         <group key={a}>
-          <Box min={[a, 1.0, D]} max={[b, 2.2, D + 0.03]} color={COLORS.aluminum} mat={{ metalness: 0.6 }} />
-          <Box min={[a + 0.04, 1.04, D + 0.03]} max={[b - 0.04, 2.16, D + 0.045]} color="#fafafa" mat={{ roughness: 0.2 }} />
+          <Box min={[a, y1, D]} max={[b, y2, D + 0.03]} color={COLORS.aluminum} mat={{ metalness: 0.6 }} />
+          <Box min={[a + 0.04, y1 + 0.04, D + 0.03]} max={[b - 0.04, y2 - 0.04, D + 0.045]} color="#fafafa" mat={{ roughness: 0.2 }} />
         </group>
       ))}
+
+      {/* Electric wall fans, centred on the middle of each side wall */}
+      <WallFan position={[ROOM.x1 + 0.05, 2.55, D / 2]} rotY={Math.PI / 2} />
+      <WallFan position={[ROOM.x2 - 0.05, 2.55, D / 2]} rotY={-Math.PI / 2} />
 
       {/* Teacher's desk + chair */}
       <Block position={[2.4, 0.76, -5.0]} size={[1.4, 0.05, 0.7]} color={COLORS.wood} />
@@ -1021,6 +1154,7 @@ function Room301Interior() {
       <pointLight position={[1.8, 2.8, -2]} intensity={5} color="#f4f8ff" />
 
       <SafetyDisplay />
+      <PowerExtension showLabels={showLabels} />
     </group>
   )
 }
@@ -1532,7 +1666,9 @@ function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
 
       {/* Room B 301 interior + all hardware (room-local coordinates) */}
       <group position={[0, TOP_Y, 0]}>
-        <Room301Interior />
+        <Room301Interior showLabels={showLabels} />
+        {/* Fire extinguisher: OUTSIDE on the hallway wall, right next to the doorway */}
+        <FireExtinguisher position={[DOOR.x2 + 0.4, 0, 0.1]} />
         {/* Entry terminal: OUTSIDE on the hallway wall, between the window and the door frame */}
         <Terminal id="entry" position={[0.6, 1.45, 0.1]} beamLength={0.8} />
         {/* Exit terminal: INSIDE wall, right of the door frame, facing into the room */}
