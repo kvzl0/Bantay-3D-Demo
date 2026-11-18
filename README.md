@@ -4,13 +4,16 @@ Interactive 3D demo for the capstone project **"A Cloud-based Smart Student Moni
 
 It models the 3-story school building: the ground floor (Rooms 101–103), the middle floor (201–203) and the top floor (301–303). A concrete switchback staircase stands on the left end of the building. Its top landing opens onto the open-air top-floor hallway, with Room B 301 (Grade 10 Diamond) right beside it and 302 and 303 further along. On every floor, the hallway's open side is a solid waist-level wall, painted pale yellow with a dark brown lower border, with green metal grid grilles mounted on top. A red fire extinguisher hangs on the hallway wall beside Room B 301's door.
 
-Inside Room B 301, all boards are on the solid front wall opposite the windows: a mini-whiteboard, the main green chalkboard and a whiteboard. The room also has:
+Room B 301's walls, as seen by a seated student facing the front:
 
-- electric fans centred on both side walls
-- a 4-row rack of orange safety helmets
-- a power extension strip near the base of the equipment wall
+| Wall | Contents |
+| --- | --- |
+| Front | Main green chalkboard, main whiteboard, mini-whiteboard; teacher's desk centred in front of them |
+| Back | 4-row rack of orange safety helmets; power outlet strip near the base |
+| Right side | Windows with metal security grilles and yellow curtains (no boards); a wall fan on the pier between them |
+| Left side (hallway/door wall) | Door, Exit terminal beside the door frame, equipment shelf above the door, a wall fan |
 
-The Entry terminal (Hikvision) is mounted outside on the hallway wall, between the window and the door. The Exit terminal and the network shelf (Mini PC, DITO ZTE K10, Mercusys AC12G, ESP32 + GSM) are inside the room, around the door.
+The Hikvision Entry terminal and the red fire extinguisher are mounted outside on the hallway wall, next to the doorway. The shelf above the door holds the Mini PC, DITO ZTE K10, Mercusys AC12G and ESP32 + GSM.
 
 ### Network topology (all inside Room B 301)
 
@@ -81,3 +84,10 @@ npm run commit -- "feat: your message"
 ```
 
 The script sets `GIT_AUTHOR_NAME/EMAIL` and `GIT_COMMITTER_NAME/EMAIL` to `Kiev Gonzales <kvzl0@users.noreply.github.com>` for that one commit.
+
+GitHub's **Merge pull request** button records "GitHub" as the committer of the merge commit. To keep Kiev Gonzales as both author and committer, merge locally instead:
+
+```bash
+npm run merge -- feat/your-branch   # creates the merge commit on main
+git push origin main                # GitHub then marks the PR as merged
+```
