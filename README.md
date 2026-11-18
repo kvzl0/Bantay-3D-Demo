@@ -11,7 +11,18 @@ It models the 3-story school building: the ground floor (Rooms 101–103), the m
 
 The stairs have black iron balusters with tall rectangular loops and a dark brown wooden handrail along every flight. On the top floor, the same railing guards the edge of the stair opening on the landing.
 
-Every classroom's hallway wall has an emergency front door, three curtained windows with grilles, and the rear door. Students use only the rear door to enter and leave.
+The stairwell is enclosed by solid walls, with small windows at the mid landings. Students enter it from the courtyard through the open ground-floor front of the stair landing.
+
+Every classroom's hallway wall has an emergency front door, three curtained windows with grilles, and the rear door. Students use only the rear door to enter and leave. All nine classrooms share Room B 301's front wall (boards, TV, posters), teacher's table and 60-armchair layout. The 540 chairs are drawn with GPU instancing.
+
+The school grounds include:
+
+- a paved courtyard with garden beds, trees (including a big mango tree by the stair entrance) and benches
+- potted palms along the ground-floor hallway
+- a flagpole with the Philippine flag
+- a neighbouring two-story building
+- a perimeter wall with a "Claro M. Recto High School" gate sign
+- a blue pitched roof, a procedural sky and distance fog
 
 Room B 301 (front wall next to the stairs, back wall next to Room 302), as seen by a seated student facing the front:
 
