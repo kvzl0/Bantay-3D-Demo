@@ -72,9 +72,21 @@ const FLIGHT_OUT = { x1: STAIR.x1, x2: STAIR.x1 + 2.0, cx: STAIR.x1 + 1.0 } // f
 const FLIGHT_IN = { x1: STAIR.x1 + 2.1, x2: STAIR.x2, cx: (STAIR.x1 + 2.1 + STAIR.x2) / 2 } // flight 2 (beside 301)
 const STAIR_DIVIDER = STAIR.x1 + 2.05
 const HALL_Z = 3.0 // outer edge of the hallway
-const DOOR = { x1: 1.1, x2: 2.1, h: 2.2 } // hinge on the right jamb (x2)
-const WINDOW = { x1: -4.2, x2: -0.2, y1: 1.0, y2: 2.6 }
-const SHELF_Y = 2.62 // top surface of the indoor shelf above the door
+/* Every classroom's hallway wall (room-local x; x = -6 is the front, x = 4 the back):
+   emergency FRONT door | 3 curtained windows | exit terminal | REAR door (entry/exit) */
+const FRONT_DOOR = { x1: -5.4, x2: -4.4, h: 2.2 } // emergency use only (stays closed)
+const REAR_DOOR = { x1: 2.6, x2: 3.6, h: 2.2 } // student entry & exit; hinge on x2 (back side)
+const DOOR = REAR_DOOR
+const WINDOW = { x1: -4.2, x2: -0.2, y1: 1.0, y2: 2.6 } // default size / sill & head heights
+const HALL_WINDOWS = [
+  { x1: -3.6, x2: -2.0, y1: WINDOW.y1, y2: WINDOW.y2 },
+  { x1: -1.65, x2: -0.05, y1: WINDOW.y1, y2: WINDOW.y2 },
+  { x1: 0.3, x2: 1.6, y1: WINDOW.y1, y2: WINDOW.y2 },
+]
+const TERMINAL_X = REAR_DOOR.x1 - 0.45 // entry (outside) & exit (inside) terminals, front side of the rear door
+const SHELF_Y = 2.62 // top surface of the shelf above the rear door
+const MINI_SHELF_Y = 2.62 // top surface of the Mini PC shelf above the helmet rack (back wall)
+const WALL_FAN_Y = 2.9 // wall fans sit above the windows, curtain rods and boards
 const WALK_SPEED = 2.0
 
 const FLOORS = [
@@ -160,76 +172,85 @@ function stairClimbPoints() {
   return pts
 }
 
-/* Room-local points in front of / inside Room 301 */
-const AT_ENTRY_TERMINAL = [0.6, 0, 1.0] // hallway side, facing the outdoor entry terminal
-const AT_EXIT_TERMINAL = [2.6, 0, -0.9] // inside, facing the indoor exit terminal
-const AT_SEAT = [-0.7, 0, -1.75] // hallway-side aisle, beside the student's armchair
+/* Room-local points in front of / inside Room 301 (all around the REAR door) */
+const AT_ENTRY_TERMINAL = [TERMINAL_X, 0, 1.0] // hallway side, facing the outdoor entry terminal
+const AT_EXIT_TERMINAL = [TERMINAL_X, 0, -0.9] // inside, facing the indoor exit terminal
+const DOOR_LANE_X = 2.95 // walking line through the rear door (clear of the swung leaf at the hinge)
+const AT_SEAT = [0.55, 0, -3.0] // centre aisle, beside the student's armchair in the back row
+const BACK_AREA = [1.2, 0, -3.0] // open area behind the last row
 
 /* ------------------------------------------------------------------ */
 /* Wires & devices (room-301-local coordinates, inside the room)       */
 /* ------------------------------------------------------------------ */
 
 /*
- * Network topology (all inside Room B 301, on the shelf above the door):
+ * Network topology (all inside Room B 301):
  *   Hikvision scanners --LAN--> Mercusys AC12G (black router / local switch)
  *   Mercusys AC12G --LAN--> Mini PC (central node)
  *   DITO ZTE K10 --internet--> Mini PC  (cellular internet access)
  *   Mini PC --cloud link--> Cloud database
  *   Mini PC --trigger--> ESP32 + GSM module --SMS--> parent
- * Shelf order, left to right: DITO, Mini PC, Mercusys, ESP32 + GSM.
+ * Shelf above the REAR door (left to right from inside): DITO, Mercusys, ESP32 + GSM.
+ * The Mini PC sits on its own shelf above the helmet rack on the back wall,
+ * out of the students' reach. Cables run along the walls between the two shelves.
  */
+const BACK_X = ROOM.x2 - 0.05 // inner face of the back wall
 const DEVICES = {
-  dito: [0.68, SHELF_Y + 0.07, -0.28], // centre of the pill-shaped base
-  miniPc: [1.1, SHELF_Y + 0.05, -0.28],
-  mercusys: [1.68, SHELF_Y + 0.025, -0.28],
-  esp: [2.38, SHELF_Y + 0.015, -0.3],
-  gsmAntennaTip: [2.53, SHELF_Y + 0.22, -0.3],
-  cloud: [1.1, 5.6, 0.8],
+  dito: [2.45, SHELF_Y + 0.07, -0.28], // centre of the pill-shaped base
+  mercusys: [3.0, SHELF_Y + 0.025, -0.28],
+  esp: [3.55, SHELF_Y + 0.015, -0.3],
+  gsmAntennaTip: [3.7, SHELF_Y + 0.22, -0.3],
+  miniPc: [BACK_X - 0.17, MINI_SHELF_Y + 0.05, -1.4],
+  cloud: [3.0, 5.6, 0.8],
 }
 
 const WIRES = {
-  // Outdoor entry terminal (hallway wall, between window and door) -> up the wall,
-  // through the wall into the room, under the shelf -> Mercusys LAN port
+  // Outdoor entry terminal (hallway side of the rear door) -> up the wall,
+  // through the wall into the room, under the door shelf -> Mercusys LAN port
   entryWire: buildPath([
-    [0.6, 1.62, 0.13],
-    [0.6, 2.5, 0.13],
-    [0.6, 2.5, -0.12],
-    [1.6, 2.5, -0.12],
-    [1.6, 2.645, -0.13],
-    [1.6, 2.66, -0.16],
+    [TERMINAL_X, 1.62, 0.13],
+    [TERMINAL_X, 2.5, 0.13],
+    [TERMINAL_X, 2.5, -0.12],
+    [2.92, 2.5, -0.12],
+    [2.92, 2.645, -0.13],
+    [2.92, 2.66, -0.16],
   ]),
-  // Indoor exit terminal (right of the door) -> Mercusys LAN port
+  // Indoor exit terminal (same spot, inside) -> Mercusys LAN port
   exitWire: buildPath([
-    [2.6, 1.62, -0.13],
-    [2.6, 2.5, -0.12],
-    [1.76, 2.5, -0.12],
-    [1.76, 2.645, -0.13],
-    [1.76, 2.66, -0.16],
+    [TERMINAL_X, 1.62, -0.13],
+    [TERMINAL_X, 2.45, -0.12],
+    [3.08, 2.45, -0.12],
+    [3.08, 2.645, -0.13],
+    [3.08, 2.66, -0.16],
   ]),
-  // Mercusys AC12G -> Mini PC (LAN)
+  // Mercusys AC12G -> along the door wall to the back corner -> along the back wall -> Mini PC (LAN)
   lan: buildPath([
-    [1.55, 2.65, -0.16],
-    [1.55, 2.64, -0.13],
-    [1.15, 2.64, -0.13],
-    [1.15, 2.67, -0.15],
+    [3.2, 2.645, -0.16],
+    [3.2, 2.64, -0.12],
+    [BACK_X - 0.03, 2.64, -0.12],
+    [BACK_X - 0.03, 2.66, -1.22],
+    [BACK_X - 0.12, 2.67, -1.25],
   ]),
-  // DITO ZTE K10 -> Mini PC (cellular internet access)
+  // DITO ZTE K10 -> same cable route, a little higher -> Mini PC (cellular internet access)
   ditoLink: buildPath([
-    [0.86, 2.68, -0.24],
-    [0.91, 2.675, -0.22],
-    [0.96, 2.67, -0.22],
+    [2.62, 2.69, -0.24],
+    [2.62, 2.76, -0.12],
+    [BACK_X - 0.03, 2.76, -0.12],
+    [BACK_X - 0.03, 2.72, -1.3],
+    [BACK_X - 0.12, 2.7, -1.32],
   ]),
   // Mini PC -> cloud database (drawn dashed, up through the roof)
   uplink: buildPath([
-    [1.1, 2.72, -0.28],
-    [1.1, 5.35, 0.8],
+    [DEVICES.miniPc[0], 2.72, -1.4],
+    [DEVICES.cloud[0], 5.35, DEVICES.cloud[2]],
   ]),
-  // Mini PC -> ESP32 + GSM (serial/USB trigger), along the shelf's front lip
+  // Mini PC -> back wall -> door shelf front lip -> ESP32 + GSM (serial/USB trigger)
   espWire: buildPath([
-    [1.1, 2.64, -0.42],
-    [1.1, 2.632, -0.45],
-    [2.22, 2.632, -0.45],
-    [2.29, 2.645, -0.32],
+    [BACK_X - 0.12, 2.62, -1.26],
+    [BACK_X - 0.03, 2.6, -1.2],
+    [BACK_X - 0.03, 2.6, -0.5],
+    [3.6, 2.632, -0.45],
+    [3.47, 2.645, -0.32],
   ]),
 }
 
@@ -292,7 +313,13 @@ function makeEntryTimeline() {
   // 3. Door swings inward, 4. student steps inside and walks to the armchair
   const doorOpen = [G + 0.2, G + 1.2]
   const stepIn = walk(
-    [top(AT_ENTRY_TERMINAL), top([1.5, 0, 0.9]), top([1.5, 0, -0.6]), top([0.8, 0, -1.2]), top(AT_SEAT)],
+    [
+      top(AT_ENTRY_TERMINAL),
+      top([DOOR_LANE_X, 0, 0.9]),
+      top([DOOR_LANE_X, 0, -0.6]), // index 2: inside the rear door
+      top(BACK_AREA),
+      top(AT_SEAT),
+    ],
     doorOpen[1] - 0.2,
     { face: -Math.PI / 2 },
   )
@@ -324,7 +351,7 @@ function makeEntryTimeline() {
 
 function makeExitTimeline() {
   // 1. Armchair -> indoor exit terminal
-  const toTerminal = walk([top(AT_SEAT), top([0.9, 0, -1.4]), top(AT_EXIT_TERMINAL)], 0, { face: 0 })
+  const toTerminal = walk([top(AT_SEAT), top(BACK_AREA), top([1.6, 0, -1.3]), top(AT_EXIT_TERMINAL)], 0, { face: 0 })
   // 2. Face scan
   const s0 = toTerminal.to + 0.2
   const scan = { terminal: 'exit', from: s0, to: s0 + 2, granted: s0 + 1.4 }
@@ -334,8 +361,8 @@ function makeExitTimeline() {
   const out = walk(
     [
       top(AT_EXIT_TERMINAL),
-      top([1.5, 0, -0.75]),
-      top([1.5, 0, 1.5]), // index 2: outside, clear of the door leaf
+      top([DOOR_LANE_X, 0, -0.75]),
+      top([DOOR_LANE_X, 0, 1.5]), // index 2: outside, clear of the door leaf
       top([FLIGHT_IN.cx, 0, 1.5]), // west along the hallway to the stair landing
       ...stairClimbPoints().reverse(),
       COURTYARD_START,
@@ -375,10 +402,10 @@ const TIMELINES = { entry: withThresholds(makeEntryTimeline()), exit: withThresh
 
 /** Camera presets (world coordinates). `follow` tracks the student. */
 const VIEWS = {
-  // From the courtyard air on the stair side: stair landing, entry terminal, door and window
-  hallway: { label: 'Hallway', pos: [-5.5, TOP_Y + 3.0, 8.5], target: [0.3, TOP_Y + 1.5, 0.3] },
-  // From the front-right corner (above the teacher's desk) toward the door wall and back wall
-  classroom: { label: 'Classroom', pos: [-4.6, TOP_Y + 2.7, -5.2], target: [2.0, TOP_Y + 1.6, -0.8] },
+  // From the courtyard air: Room B 301's hallway wall (both doors, windows, entry terminal)
+  hallway: { label: 'Hallway', pos: [-3.0, TOP_Y + 3.0, 8.8], target: [0.8, TOP_Y + 1.5, 0.3] },
+  // From the front corner by the window wall toward the rear door and the back wall
+  classroom: { label: 'Classroom', pos: [-4.6, TOP_Y + 2.7, -5.2], target: [3.0, TOP_Y + 1.6, -1.2] },
   overview: { label: 'Overview', pos: [30, 22, 34], target: [5, 4.5, -1] },
 }
 // Follow camera sits to the front-left so the left-side stairwell isn't hidden by the building
@@ -576,7 +603,8 @@ function Courtyard() {
   )
 }
 
-function Door({ animated = false, shadow = true }) {
+/** Dark brown wooden door hinged on its x2 jamb. Only Room 301's rear door is animated. */
+function Door({ door = DOOR, animated = false, shadow = true }) {
   const pivot = useRef()
   useSimFrame(({ tl, t }) => {
     if (!animated) return
@@ -587,7 +615,7 @@ function Door({ animated = false, shadow = true }) {
     }
     pivot.current.rotation.y = angle
   })
-  const w = DOOR.x2 - DOOR.x1
+  const w = door.x2 - door.x1
   const inset = (y1, y2, front) => (
     <Box
       min={[-(w - 0.15), y1, front ? 0.025 : -0.035]}
@@ -598,10 +626,10 @@ function Door({ animated = false, shadow = true }) {
   )
   return (
     // Hinge on the right jamb; the leaf extends toward -x.
-    <group ref={pivot} position={[DOOR.x2, 0, 0]}>
+    <group ref={pivot} position={[door.x2, 0, 0]}>
       <Box
         min={[-(w - 0.01), 0.01, -0.025]}
-        max={[-0.01, DOOR.h - 0.01, 0.025]}
+        max={[-0.01, door.h - 0.01, 0.025]}
         color={COLORS.door}
         mat={{ roughness: 0.5 }}
         shadow={shadow}
@@ -662,7 +690,7 @@ function Curtain({ x1, x2, z }) {
  * Room 301's detailed multi-pane window: 3D grille bars + pleated curtains.
  * Built in a wall's local frame: grilles on local +z (outside), curtains on -z (inside).
  */
-function WindowWithGrilles({ win = WINDOW }) {
+function WindowWithGrilles({ win = WINDOW, grille = COLORS.metal, wavy = false }) {
   const { x1, x2, y1, y2 } = win
   const cx = (x1 + x2) / 2
   const w = x2 - x1
@@ -683,18 +711,23 @@ function WindowWithGrilles({ win = WINDOW }) {
         <planeGeometry args={[w, h]} />
         <meshStandardMaterial color="#cfe9f5" transparent opacity={0.18} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {/* Dark metal security grilles (hallway side) */}
+      {/* Metal security grilles (outside face). `wavy` = horizontal wavy bars (photo: window wall) */}
       <group position={[0, 0, 0.16]}>
-        <Box min={[x1, y1, -0.015]} max={[x2, y1 + 0.03, 0.015]} color={COLORS.metal} mat={metal} />
-        <Box min={[x1, y2 - 0.03, -0.015]} max={[x2, y2, 0.015]} color={COLORS.metal} mat={metal} />
-        <Box min={[x1, y1, -0.015]} max={[x1 + 0.03, y2, 0.015]} color={COLORS.metal} mat={metal} />
-        <Box min={[x2 - 0.03, y1, -0.015]} max={[x2, y2, 0.015]} color={COLORS.metal} mat={metal} />
-        {verticals.map((x) => (
-          <Block key={x} position={[x, y1 + h / 2, 0]} size={[0.02, h, 0.02]} color={COLORS.metal} mat={metal} />
-        ))}
-        {[y1 + h * 0.33, y1 + h * 0.66].map((y) => (
-          <Block key={y} position={[cx, y, 0]} size={[w, 0.025, 0.025]} color={COLORS.metal} mat={metal} />
-        ))}
+        <Box min={[x1, y1, -0.015]} max={[x2, y1 + 0.03, 0.015]} color={grille} mat={metal} />
+        <Box min={[x1, y2 - 0.03, -0.015]} max={[x2, y2, 0.015]} color={grille} mat={metal} />
+        <Box min={[x1, y1, -0.015]} max={[x1 + 0.03, y2, 0.015]} color={grille} mat={metal} />
+        <Box min={[x2 - 0.03, y1, -0.015]} max={[x2, y2, 0.015]} color={grille} mat={metal} />
+        {wavy
+          ? [0.18, 0.36, 0.54, 0.72].map((f) => (
+              <WavyBar key={f} x1={x1} x2={x2} y={y1 + h * f} color={grille} />
+            ))
+          : verticals.map((x) => (
+              <Block key={x} position={[x, y1 + h / 2, 0]} size={[0.02, h, 0.02]} color={grille} mat={metal} />
+            ))}
+        {!wavy &&
+          [y1 + h * 0.33, y1 + h * 0.66].map((y) => (
+            <Block key={y} position={[cx, y, 0]} size={[w, 0.025, 0.025]} color={grille} mat={metal} />
+          ))}
       </group>
       {/* Curtain rod + semi-transparent yellow curtains (classroom side) */}
       <mesh position={[cx, y2 + 0.12, -0.2]} rotation={[0, 0, Math.PI / 2]}>
@@ -707,9 +740,26 @@ function WindowWithGrilles({ win = WINDOW }) {
   )
 }
 
-/** Lightweight window for the other 8 classrooms (textured grille, flat curtain). */
-function SimpleWindow() {
-  const { x1, x2, y1, y2 } = WINDOW
+/** Horizontal wavy grille bar made of short tilted segments. */
+function WavyBar({ x1, x2, y, color, amp = 0.05, waves = 6 }) {
+  const n = waves * 3
+  const step = (x2 - x1) / n
+  const pts = Array.from({ length: n + 1 }, (_, i) => [x1 + i * step, y + Math.sin((i / n) * waves * Math.PI * 2) * amp])
+  return pts.slice(1).map(([bx, by], i) => {
+    const [ax, ay] = pts[i]
+    const len = Math.hypot(bx - ax, by - ay)
+    return (
+      <mesh key={i} position={[(ax + bx) / 2, (ay + by) / 2, 0]} rotation={[0, 0, Math.atan2(by - ay, bx - ax)]}>
+        <boxGeometry args={[len + 0.004, 0.022, 0.022]} />
+        <meshStandardMaterial color={color} metalness={0.4} roughness={0.5} />
+      </mesh>
+    )
+  })
+}
+
+/** Lightweight window for the other classrooms (textured grille, flat curtain). */
+function SimpleWindow({ win = WINDOW }) {
+  const { x1, x2, y1, y2 } = win
   const cx = (x1 + x2) / 2
   const w = x2 - x1
   const h = y2 - y1
@@ -731,46 +781,57 @@ function SimpleWindow() {
 }
 
 /**
- * Hallway-facing wall of one classroom: wall, baseboard, door, sign and (for the
- * other rooms) a hallway window. Room 301's hallway wall (its LEFT side wall from
- * the students' seats) has only the door; its windows are on the opposite wall.
+ * Hallway-facing wall of one classroom (every room has the same layout):
+ * emergency front door | 3 curtained windows with grilles | rear door (entry/exit).
+ * The room sign sits above the rear door. Only Room 301's rear door animates.
  */
 function RoomFront({ number, detailed }) {
   const T = 0.1
   const s = detailed // cast shadows only for the hero room
-  const wall = (x1, x2, y1, y2) => (
-    <Box key={`${x1}-${y1}`} min={[x1, y1, -T]} max={[x2, y2, T]} color={COLORS.wall} shadow={s} />
+  const openings = [{ ...FRONT_DOOR, y1: 0, y2: FRONT_DOOR.h }, ...HALL_WINDOWS, { ...REAR_DOOR, y1: 0, y2: REAR_DOOR.h }]
+  const parts = []
+  let x = ROOM.x1
+  for (const o of openings) {
+    parts.push([x, o.x1, 0, WALL_H]) // solid wall up to the opening
+    if (o.y1 > 0) parts.push([o.x1, o.x2, 0, o.y1]) // below a window
+    parts.push([o.x1, o.x2, o.y2, WALL_H]) // above the opening
+    x = o.x2
+  }
+  parts.push([x, ROOM.x2, 0, WALL_H])
+  const frame = (d) => (
+    <group key={d.x1}>
+      <Box min={[d.x1 - 0.06, 0, -0.12]} max={[d.x1, d.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+      <Box min={[d.x2, 0, -0.12]} max={[d.x2 + 0.06, d.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+      <Box min={[d.x1 - 0.06, d.h, -0.12]} max={[d.x2 + 0.06, d.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
+    </group>
   )
   return (
     <group>
-      {detailed ? (
-        wall(ROOM.x1, DOOR.x1, 0, WALL_H)
-      ) : (
-        <>
-          {wall(ROOM.x1, WINDOW.x1, 0, WALL_H)}
-          {wall(WINDOW.x1, WINDOW.x2, 0, WINDOW.y1)}
-          {wall(WINDOW.x1, WINDOW.x2, WINDOW.y2, WALL_H)}
-          {wall(WINDOW.x2, DOOR.x1, 0, WALL_H)}
-        </>
-      )}
-      {wall(DOOR.x1, DOOR.x2, DOOR.h, WALL_H)}
-      {wall(DOOR.x2, ROOM.x2, 0, WALL_H)}
-      {/* Dark brown painted lower border, both faces */}
-      <Box min={[ROOM.x1, 0, -0.12]} max={[DOOR.x1 - 0.06, 0.3, 0.12]} color={COLORS.baseboard} shadow={s} />
-      <Box min={[DOOR.x2 + 0.06, 0, -0.12]} max={[ROOM.x2, 0.3, 0.12]} color={COLORS.baseboard} shadow={s} />
-      {/* Door frame */}
-      <Box min={[DOOR.x1 - 0.06, 0, -0.12]} max={[DOOR.x1, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
-      <Box min={[DOOR.x2, 0, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
-      <Box min={[DOOR.x1 - 0.06, DOOR.h, -0.12]} max={[DOOR.x2 + 0.06, DOOR.h + 0.06, 0.12]} color={COLORS.frame} shadow={s} />
-      <Door animated={detailed} shadow={s} />
+      {parts.map(([x1, x2, y1, y2]) => (
+        <Box key={`${x1}-${y1}`} min={[x1, y1, -T]} max={[x2, y2, T]} color={COLORS.wall} shadow={s} />
+      ))}
+      {/* Dark brown painted lower border, both faces (broken at the doors) */}
+      {[
+        [ROOM.x1, FRONT_DOOR.x1 - 0.06],
+        [FRONT_DOOR.x2 + 0.06, REAR_DOOR.x1 - 0.06],
+        [REAR_DOOR.x2 + 0.06, ROOM.x2],
+      ].map(([a, b]) => (
+        <Box key={a} min={[a, 0, -0.12]} max={[b, 0.3, 0.12]} color={COLORS.baseboard} shadow={s} />
+      ))}
+      {frame(FRONT_DOOR)}
+      {frame(REAR_DOOR)}
+      <Door door={FRONT_DOOR} shadow={s} />
+      <Door door={REAR_DOOR} animated={detailed} shadow={s} />
       <RoomSign text={`B ${number}`} />
-      {!detailed && <SimpleWindow />}
+      {HALL_WINDOWS.map((w) =>
+        detailed ? <WindowWithGrilles key={w.x1} win={w} /> : <SimpleWindow key={w.x1} win={w} />,
+      )}
     </group>
   )
 }
 
 /* Room 301's RIGHT side wall (z = -6, opposite the hallway): two large windows
-   separated by a central pier (room-local x ranges). */
+   with white wavy grilles and yellow curtains, separated by a central pier. */
 const SIDE_WINDOWS = [
   { x1: -5.0, x2: -1.6 },
   { x1: -0.4, x2: 3.0 },
@@ -800,7 +861,7 @@ function RoomRear({ detailed }) {
       {/* Rotated so the grilles face outside (-z) and the yellow curtains face the room */}
       <group position={[0, 0, (z1 + z2) / 2]} rotation={[0, Math.PI, 0]}>
         {SIDE_WINDOWS.map((w) => (
-          <WindowWithGrilles key={w.x1} win={{ x1: -w.x2, x2: -w.x1, y1, y2 }} />
+          <WindowWithGrilles key={w.x1} win={{ x1: -w.x2, x2: -w.x1, y1, y2 }} grille="#e5e7eb" wavy />
         ))}
       </group>
     </group>
@@ -972,17 +1033,18 @@ function Staircase({ showLabels }) {
  * Dark wooden student armchair with a writing tablet on the student's right.
  * Faces local -z; rotY = PI/2 turns it to face -x (Room 301's front wall).
  */
-function Armchair({ x, z, rotY = 0 }) {
+function Armchair({ x, z, rotY = 0, scale = 1 }) {
   const legs = []
   for (const dx of [-0.18, 0.18]) for (const dz of [-0.18, 0.18]) legs.push([dx, dz])
+  const s = false // 60 chairs: skip shadows to keep the scene light
   return (
-    <group position={[x, 0, z]} rotation={[0, rotY, 0]}>
-      <Block position={[0, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.wood} />
-      <Block position={[0, 0.74, 0.2]} size={[0.42, 0.3, 0.03]} color={COLORS.wood} />
-      <Block position={[0.25, 0.73, -0.1]} size={[0.24, 0.025, 0.5]} color={COLORS.wood} />
-      <Block position={[0.33, 0.6, 0.05]} size={[0.03, 0.27, 0.03]} color={COLORS.woodDark} />
+    <group position={[x, 0, z]} rotation={[0, rotY, 0]} scale={scale}>
+      <Block position={[0, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.wood} shadow={s} />
+      <Block position={[0, 0.74, 0.2]} size={[0.42, 0.3, 0.03]} color={COLORS.wood} shadow={s} />
+      <Block position={[0.25, 0.73, -0.1]} size={[0.24, 0.025, 0.5]} color={COLORS.wood} shadow={s} />
+      <Block position={[0.33, 0.6, 0.05]} size={[0.03, 0.27, 0.03]} color={COLORS.woodDark} shadow={s} />
       {legs.map(([dx, dz]) => (
-        <Block key={`${dx}${dz}`} position={[dx, 0.215, dz]} size={[0.03, 0.43, 0.03]} color={COLORS.woodDark} />
+        <Block key={`${dx}${dz}`} position={[dx, 0.215, dz]} size={[0.03, 0.43, 0.03]} color={COLORS.woodDark} shadow={s} />
       ))}
     </group>
   )
@@ -1006,9 +1068,9 @@ function FluorescentLight({ x, z }) {
   )
 }
 
-function HardHat({ position }) {
+function HardHat({ position, scale = 1 }) {
   return (
-    <group position={position}>
+    <group position={position} scale={scale}>
       <mesh castShadow>
         <sphereGeometry args={[0.13, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
         <meshStandardMaterial color="#f97316" roughness={0.4} />
@@ -1021,37 +1083,66 @@ function HardHat({ position }) {
   )
 }
 
-/** Safety equipment display centred on Room 301's BACK wall. */
+/* Back wall layout (z along the wall, from the window side to the hallway side) */
+const HELMET_RACK = { z1: -2.78, z2: -0.32 } // beside the rear door
+const BACK_OUTLET_Z = -3.25 // middle of the back wall, near the base
+const VISION_BOARD = { z1: -5.4, z2: -3.7, y1: 1.0, y2: 2.15 }
+
+/** 4 rows x 8 orange safety helmets on a dark metal rack, in the back-wall corner by the rear door. */
 function SafetyDisplay() {
-  const sign = useTextTexture('SAFETY EQUIPMENT', {
-    w: 512,
-    h: 96,
-    font: 'bold 52px Arial, Helvetica, sans-serif',
-    bg: '#15803d',
-    fg: '#ffffff',
-  })
-  const wx = ROOM.x2 - 0.05 // inner face of the back wall (partition to Room 302)
-  const rows = [0.95, 1.33, 1.71, 2.09] // shelf tops: 4 clean rows
-  const cols = [-3.68, -3.23, -2.78, -2.33]
-  const [z1, z2] = [-3.9, -2.1]
+  const wx = BACK_X
+  const rows = [0.95, 1.31, 1.67, 2.03] // shelf tops: 4 clean rows
+  const cols = Array.from({ length: 8 }, (_, i) => HELMET_RACK.z2 - 0.18 - i * 0.3)
+  const { z1, z2 } = HELMET_RACK
   return (
     <group>
-      {/* Wall-mounted rack: two uprights + 4 shelves, each holding 4 orange safety helmets */}
       {[z1, z2 - 0.03].map((z) => (
-        <Box key={z} min={[wx - 0.32, 0.75, z]} max={[wx, 2.35, z + 0.03]} color={COLORS.woodDark} />
+        <Box key={z} min={[wx - 0.28, 0.75, z]} max={[wx, 2.3, z + 0.03]} color="#1f2937" />
       ))}
-      <Box min={[wx - 0.02, 0.75, z1]} max={[wx, 2.35, z2]} color={COLORS.wood} shadow={false} />
       {rows.map((y) => (
         <group key={y}>
-          <Box min={[wx - 0.32, y - 0.035, z1]} max={[wx, y, z2]} color={COLORS.wood} />
+          <Box min={[wx - 0.28, y - 0.025, z1]} max={[wx, y, z2]} color="#374151" mat={{ metalness: 0.4 }} />
           {cols.map((z) => (
-            <HardHat key={z} position={[wx - 0.17, y, z]} />
+            <HardHat key={z} position={[wx - 0.15, y, z]} scale={0.8} />
           ))}
         </group>
       ))}
-      <mesh position={[wx - 0.005, 2.55, (z1 + z2) / 2]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[1.2, 0.22]} />
-        <meshBasicMaterial map={sign} toneMapped={false} />
+    </group>
+  )
+}
+
+/** Students' vision board: a pinned collage of colourful cards (canvas texture). */
+function VisionBoard() {
+  const tex = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 512
+    c.height = 352
+    const g = c.getContext('2d')
+    g.fillStyle = '#f8fafc'
+    g.fillRect(0, 0, 512, 352)
+    const palette = ['#f472b6', '#60a5fa', '#facc15', '#34d399', '#fb923c', '#a78bfa', '#f87171', '#22d3ee']
+    let seed = 7
+    const rand = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280)
+    for (let row = 0; row < 5; row++)
+      for (let col = 0; col < 8; col++) {
+        g.fillStyle = palette[Math.floor(rand() * palette.length)]
+        g.fillRect(col * 64 + 4 + rand() * 6, 40 + row * 62 + rand() * 6, 52, 50)
+        g.fillStyle = 'rgba(255,255,255,0.7)'
+        g.fillRect(col * 64 + 10, 50 + row * 62, 30, 6)
+      }
+    g.fillStyle = '#1e293b'
+    g.font = 'bold 30px Arial, Helvetica, sans-serif'
+    g.textAlign = 'center'
+    g.fillText('VISION BOARD', 256, 28)
+    return canvasTexture(c)
+  }, [])
+  const { z1, z2, y1, y2 } = VISION_BOARD
+  return (
+    <group>
+      <Box min={[BACK_X - 0.03, y1, z1]} max={[BACK_X, y2, z2]} color="#8b5e34" />
+      <mesh position={[BACK_X - 0.031, (y1 + y2) / 2, (z1 + z2) / 2]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[z2 - z1 - 0.06, y2 - y1 - 0.06]} />
+        <meshStandardMaterial map={tex} roughness={0.9} />
       </mesh>
     </group>
   )
@@ -1091,42 +1182,73 @@ function FireExtinguisher({ position }) {
  * Local +z points away from the wall; the head tilts down toward the room.
  */
 function WallFan({ position, rotY }) {
-  const blades = useRef()
-  useFrame((_, dt) => {
-    blades.current.rotation.z += dt * 14
-  })
   return (
     <group position={position} rotation={[0, rotY, 0]}>
       <Block position={[0, 0, 0.03]} size={[0.14, 0.14, 0.06]} color="#e5e7eb" />
       <Block position={[0, -0.02, 0.12]} size={[0.04, 0.04, 0.14]} color="#d1d5db" shadow={false} />
       <group position={[0, -0.04, 0.2]} rotation={[0.35, 0, 0]}>
-        <mesh position={[0, 0, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.065, 0.075, 0.14, 20]} />
-          <meshStandardMaterial color="#f3f4f6" roughness={0.4} />
+        <FanHead />
+      </group>
+    </group>
+  )
+}
+
+/** Motor, guard and spinning blades of a fan. Blows toward local +z. */
+function FanHead({ dark = false }) {
+  const blades = useRef()
+  useFrame((_, dt) => {
+    blades.current.rotation.z += dt * 14
+  })
+  return (
+    <group>
+      <mesh position={[0, 0, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.065, 0.075, 0.14, 20]} />
+        <meshStandardMaterial color={dark ? '#374151' : '#f3f4f6'} roughness={0.4} />
+      </mesh>
+      <group position={[0, 0, 0.15]}>
+        <mesh>
+          <torusGeometry args={[0.21, 0.008, 8, 40]} />
+          <meshStandardMaterial color={dark ? '#1f2937' : '#9ca3af'} metalness={0.5} />
         </mesh>
-        <group position={[0, 0, 0.15]}>
-          <mesh>
-            <torusGeometry args={[0.21, 0.008, 8, 40]} />
-            <meshStandardMaterial color="#9ca3af" metalness={0.5} />
+        <mesh position={[0, 0, 0.012]}>
+          <circleGeometry args={[0.21, 32]} />
+          <meshStandardMaterial color="#cbd5e1" transparent opacity={0.25} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+        <group ref={blades}>
+          {[0, 1, 2].map((i) => (
+            <group key={i} rotation={[0, 0, (i * 2 * Math.PI) / 3]}>
+              <mesh position={[0, 0.1, 0]}>
+                <boxGeometry args={[0.07, 0.17, 0.005]} />
+                <meshStandardMaterial color={dark ? '#4b5563' : '#60a5fa'} transparent opacity={0.85} />
+              </mesh>
+            </group>
+          ))}
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.03, 12]} />
+            <meshStandardMaterial color="#e5e7eb" />
           </mesh>
-          <mesh position={[0, 0, 0.012]}>
-            <circleGeometry args={[0.21, 32]} />
-            <meshStandardMaterial color="#cbd5e1" transparent opacity={0.25} side={THREE.DoubleSide} depthWrite={false} />
-          </mesh>
-          <group ref={blades}>
-            {[0, 1, 2].map((i) => (
-              <group key={i} rotation={[0, 0, (i * 2 * Math.PI) / 3]}>
-                <mesh position={[0, 0.1, 0]}>
-                  <boxGeometry args={[0.07, 0.17, 0.005]} />
-                  <meshStandardMaterial color="#60a5fa" transparent opacity={0.85} />
-                </mesh>
-              </group>
-            ))}
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.03, 0.03, 0.03, 12]} />
-              <meshStandardMaterial color="#e5e7eb" />
-            </mesh>
-          </group>
+        </group>
+      </group>
+    </group>
+  )
+}
+
+/** Ceiling-mounted orbit fan: the head points down at an angle and slowly rotates around. */
+function CeilingFan({ x, z }) {
+  const orbit = useRef()
+  useFrame((_, dt) => {
+    orbit.current.rotation.y += dt * 0.6
+  })
+  return (
+    <group position={[x, WALL_H, z]}>
+      <mesh position={[0, -0.02, 0]}>
+        <cylinderGeometry args={[0.1, 0.1, 0.04, 20]} />
+        <meshStandardMaterial color="#e5e7eb" />
+      </mesh>
+      <group ref={orbit}>
+        <Block position={[0, -0.14, 0]} size={[0.03, 0.22, 0.03]} color="#9ca3af" shadow={false} />
+        <group position={[0, -0.28, 0]} rotation={[Math.PI / 2 - 0.55, 0, 0]}>
+          <FanHead dark />
         </group>
       </group>
     </group>
@@ -1134,18 +1256,18 @@ function WallFan({ position, rotY }) {
 }
 
 /**
- * Power outlet strip near the base of Room 301's BACK wall (hallway-side corner),
- * plugged into a wall outlet. Its cord runs along the base to the door wall and
- * up to the equipment shelf above the door.
+ * Power outlet strip near the base, in the middle of Room 301's BACK wall,
+ * plugged into a wall outlet. One cord runs up the back wall to the Mini PC
+ * shelf; another runs along the base and up the door wall to the rear-door shelf.
  */
 function PowerExtension({ showLabels }) {
-  const wx = ROOM.x2 - 0.05 // inner face of the back wall
-  const zc = -1.1 // strip centre (between the helmet rack and the corner)
+  const wx = BACK_X
+  const zc = BACK_OUTLET_Z // strip centre
   return (
     <group>
       {/* Wall outlet plate */}
-      <Block position={[wx - 0.006, 0.42, -1.6]} size={[0.012, 0.12, 0.08]} color="#f5f5f4" shadow={false} />
-      <Block position={[wx - 0.013, 0.42, -1.6]} size={[0.004, 0.05, 0.03]} color="#374151" shadow={false} />
+      <Block position={[wx - 0.006, 0.42, zc - 0.45]} size={[0.012, 0.12, 0.08]} color="#f5f5f4" shadow={false} />
+      <Block position={[wx - 0.013, 0.42, zc - 0.45]} size={[0.004, 0.05, 0.03]} color="#374151" shadow={false} />
       {/* Extension strip with 4 sockets and a lit switch, facing into the room (-x) */}
       <Block position={[wx - 0.03, 0.45, zc]} size={[0.06, 0.06, 0.42]} color="#fafafa" />
       {[-0.13, -0.05, 0.03, 0.11].map((dz) => (
@@ -1158,15 +1280,27 @@ function PowerExtension({ showLabels }) {
         mat={{ emissive: '#f97316', emissiveIntensity: 1.2 }}
         shadow={false}
       />
-      {/* Cords: outlet -> strip, strip -> corner -> up the door wall -> shelf */}
-      <Line points={[[wx - 0.02, 0.4, -1.6], [wx - 0.02, 0.38, -1.45], [wx - 0.03, 0.44, -1.32]]} color="#e5e7eb" lineWidth={2} />
+      {/* Cords: outlet -> strip; strip -> up the back wall -> Mini PC shelf;
+          strip -> along the base -> up beside the rear door -> door shelf */}
+      <Line points={[[wx - 0.02, 0.4, zc - 0.45], [wx - 0.02, 0.38, zc - 0.33], [wx - 0.03, 0.44, zc - 0.22]]} color="#e5e7eb" lineWidth={2} />
       <Line
         points={[
-          [wx - 0.04, 0.47, -0.88],
-          [wx - 0.03, 0.35, -0.13],
-          [2.85, 0.35, -0.13],
-          [2.85, 2.56, -0.13],
-          [2.7, 2.62, -0.3],
+          [wx - 0.04, 0.48, zc + 0.22],
+          [wx - 0.02, 0.6, zc + 0.3],
+          [wx - 0.02, 2.5, zc + 0.3],
+          [wx - 0.02, 2.58, -1.9],
+        ]}
+        color="#9ca3af"
+        lineWidth={2}
+      />
+      <Line
+        points={[
+          [wx - 0.04, 0.44, zc + 0.22],
+          [wx - 0.02, 0.33, zc + 0.4],
+          [wx - 0.02, 0.33, -0.13],
+          [REAR_DOOR.x2 + 0.2, 0.33, -0.13],
+          [REAR_DOOR.x2 + 0.2, 2.56, -0.13],
+          [3.75, 2.62, -0.3],
         ]}
         color="#9ca3af"
         lineWidth={2}
@@ -1178,24 +1312,37 @@ function PowerExtension({ showLabels }) {
   )
 }
 
+/* Armchairs: 6 rows deep, two blocks of 5 (10 across) with a centre aisle. */
+const CHAIR_ROWS = [-3.7, -2.85, -2.0, -1.15, -0.3, 0.55] // x: front row -> back row
+const CHAIR_SPACING = 0.53
+const CHAIR_COLS = [
+  ...Array.from({ length: 5 }, (_, i) => -0.32 - i * CHAIR_SPACING), // hallway-side block
+  ...Array.from({ length: 5 }, (_, i) => -3.45 - i * CHAIR_SPACING), // window-side block
+]
+
 /**
- * Room B 301 four-wall layout (room-local coordinates; students face -x):
- *   FRONT wall  x = -6 : all boards; teacher's desk centred in front of them
- *   BACK wall   x = +4 : 4-row safety helmet rack + power outlet strip
- *   RIGHT wall  z = -6 : the window wall (grilles + yellow curtains, no boards)
- *   LEFT wall   z =  0 : hallway/door wall: door, exit terminal, equipment shelf
+ * Room B 301 layout (room-local coordinates; students face -x, the front):
+ *   FRONT wall  x = -6 (next to the stairs): mini-whiteboard | chalkboard + TV |
+ *               whiteboard | posters; one teacher's table centred in front of them
+ *   BACK wall   x = +4 (next to Room 302): vision board | power outlet strip (middle,
+ *               wall fan above) | helmet rack beside the rear door, Mini PC shelf above it
+ *   RIGHT wall  z = -6: two windows, white wavy grilles, yellow curtains
+ *   LEFT wall   z =  0 (hallway): emergency front door | 3 curtained windows |
+ *               exit terminal | rear door (entry/exit) with the device shelf above it
  */
 function Room301Interior({ showLabels }) {
   const D = -ROOM.depth
   const fx = ROOM.x1 + 0.05 // inner face of the front wall
-  const rows = [-3.7, -2.7, -1.7, -0.7, 0.3] // x: front row -> back row
-  const cols = [-5.1, -4.2, -3.3, -2.4] // z: window side -> hallway-side aisle
   const board = (z1, z2, y1, y2, face, frame = COLORS.aluminum) => (
     <group>
       <Box min={[fx, y1, z1]} max={[fx + 0.03, y2, z2]} color={frame} mat={{ metalness: 0.4 }} />
       <Box min={[fx + 0.03, y1 + 0.05, z1 + 0.05]} max={[fx + 0.045, y2 - 0.05, z2 - 0.05]} color={face} mat={{ roughness: face === '#fafafa' ? 0.2 : 0.95 }} />
     </group>
   )
+  const posters = []
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < 2; c++) posters.push([-5.5 - c * 0.24, 1.25 + r * 0.27, ['#e0f2fe', '#fef9c3', '#f1f5f9', '#dcfce7'][(r + c) % 4]])
+  const cloth = '#d8d4b0'
   return (
     <group>
       {/* Lower dark brown border on the inside faces */}
@@ -1203,32 +1350,57 @@ function Room301Interior({ showLabels }) {
       <Box min={[ROOM.x1 + 0.05, 0, D]} max={[ROOM.x1 + 0.09, 0.3, -0.1]} color={COLORS.baseboard} />
       <Box min={[ROOM.x2 - 0.09, 0, D]} max={[ROOM.x2 - 0.05, 0.3, -0.1]} color={COLORS.baseboard} />
 
-      {/* FRONT wall: main whiteboard | main green chalkboard | auxiliary mini-whiteboard */}
-      {board(-5.8, -4.4, 1.0, 2.2, '#fafafa')}
-      {board(-4.2, -1.4, 0.95, 2.35, '#1f4d34', '#5a3a1e')}
-      <Box min={[fx, 0.92, -4.2]} max={[fx + 0.1, 0.95, -1.4]} color="#5a3a1e" />
+      {/* FRONT wall (hallway side -> window side): mini-whiteboard, chalkboard + TV, whiteboard, posters */}
       {board(-1.15, -0.45, 1.3, 2.0, '#fafafa')}
+      {board(-3.0, -1.35, 0.95, 2.3, '#1f4d34', '#5a3a1e')}
+      <Box min={[fx, 0.92, -3.0]} max={[fx + 0.1, 0.95, -1.35]} color="#5a3a1e" />
+      <Block position={[fx + 0.08, 1.72, -2.17]} size={[0.05, 0.55, 0.95]} color="#0b0b0d" />
+      <mesh position={[fx + 0.106, 1.72, -2.17]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[0.88, 0.48]} />
+        <meshStandardMaterial color="#111827" emissive="#1e293b" emissiveIntensity={0.4} roughness={0.2} />
+      </mesh>
+      {board(-5.2, -3.2, 1.0, 2.25, '#fafafa')}
+      {posters.map(([z, y, color]) => (
+        <Block key={`${z}${y}`} position={[fx + 0.005, y, z]} size={[0.01, 0.22, 0.19]} color={color} shadow={false} />
+      ))}
 
-      {/* Teacher's desk centred at the front, facing the students; chair behind it */}
-      <Block position={[-4.9, 0.76, D / 2]} size={[0.7, 0.05, 1.4]} color={COLORS.wood} />
-      <Block position={[-4.72, 0.37, D / 2]} size={[0.3, 0.72, 1.3]} color="#3d2414" />
-      <Block position={[-5.45, 0.45, D / 2]} size={[0.45, 0.05, 0.45]} color={COLORS.woodDark} />
-      <Block position={[-5.67, 0.75, D / 2]} size={[0.04, 0.5, 0.45]} color={COLORS.woodDark} />
+      {/* One teacher's table with a tablecloth, centred in front of the boards */}
+      <group position={[-4.9, 0, D / 2]}>
+        {[-0.3, 0.3].map((dx) =>
+          [-0.65, 0.65].map((dz) => (
+            <Block key={`${dx}${dz}`} position={[dx, 0.37, dz]} size={[0.05, 0.74, 0.05]} color={COLORS.woodDark} />
+          )),
+        )}
+        <Block position={[0, 0.76, 0]} size={[0.75, 0.04, 1.45]} color={COLORS.wood} />
+        <Block position={[0, 0.785, 0]} size={[0.82, 0.012, 1.52]} color={cloth} />
+        <Block position={[0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} />
+        <Block position={[-0.41, 0.66, 0]} size={[0.01, 0.24, 1.52]} color={cloth} />
+        {/* Teacher's chair between the table and the boards */}
+        <Block position={[-0.6, 0.45, 0]} size={[0.42, 0.04, 0.42]} color={COLORS.woodDark} />
+        <Block position={[-0.8, 0.72, 0]} size={[0.03, 0.5, 0.42]} color={COLORS.woodDark} />
+      </group>
 
-      {/* Student armchairs in rows, all facing the front wall */}
-      {rows.map((x) => cols.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} rotY={Math.PI / 2} />))}
+      {/* Student armchairs: 6 rows, 5 + 5 across with a centre aisle, all facing the front */}
+      {CHAIR_ROWS.map((x) => CHAIR_COLS.map((z) => <Armchair key={`${x}${z}`} x={x} z={z} rotY={Math.PI / 2} scale={0.9} />))}
 
-      {/* Electric wall fans centred on the two side walls: hallway wall + window-wall pier */}
-      <WallFan position={[(ROOM.x1 + ROOM.x2) / 2, 2.55, -0.1]} rotY={Math.PI} />
-      <WallFan position={[(SIDE_WINDOWS[0].x2 + SIDE_WINDOWS[1].x1) / 2, 2.55, D]} rotY={0} />
+      {/* BACK wall: vision board, outlet strip in the middle (fan above), helmet rack by the rear door */}
+      <VisionBoard />
+      <PowerExtension showLabels={showLabels} />
+      <SafetyDisplay />
+
+      {/* Electric wall fans (top-centre of each wall) + ceiling orbit fans */}
+      <WallFan position={[fx, WALL_FAN_Y, -3.1]} rotY={Math.PI / 2} />
+      <WallFan position={[BACK_X, WALL_FAN_Y, BACK_OUTLET_Z]} rotY={-Math.PI / 2} />
+      <WallFan position={[(HALL_WINDOWS[1].x1 + HALL_WINDOWS[1].x2) / 2, WALL_FAN_Y, -0.1]} rotY={Math.PI} />
+      <WallFan position={[(SIDE_WINDOWS[0].x2 + SIDE_WINDOWS[1].x1) / 2, WALL_FAN_Y, D]} rotY={0} />
+      {[-3.8, -1.0, 1.8].map((x) => (
+        <CeilingFan key={x} x={x} z={D / 2} />
+      ))}
 
       {/* Overhead fluorescent fixtures + their light */}
       {[-3.8, -1.0, 1.8].map((x) => [-1.8, -4.2].map((z) => <FluorescentLight key={`${x}${z}`} x={x} z={z} />))}
       <pointLight position={[-2.4, 2.8, -3]} intensity={6} color="#f4f8ff" />
       <pointLight position={[1.8, 2.8, -2]} intensity={5} color="#f4f8ff" />
-
-      <SafetyDisplay />
-      <PowerExtension showLabels={showLabels} />
     </group>
   )
 }
@@ -1366,22 +1538,38 @@ function DitoRouter() {
   )
 }
 
-function NetworkShelf({ showLabels }) {
-  const front = -0.415 // z of the device faces (facing into the room)
+/** Mini PC on its own shelf above the helmet rack (back wall), out of the students' reach. */
+function MiniPcShelf({ showLabels }) {
+  const [x, y, z] = DEVICES.miniPc
   return (
     <group>
-      {/* Shelf board + brackets, mounted on the inside face of the front wall */}
-      <Box min={[0.42, SHELF_Y - 0.04, -0.46]} max={[2.72, SHELF_Y, -0.1]} color={COLORS.wood} />
-      {[0.5, 2.64].map((x) => (
+      <Box min={[BACK_X - 0.32, MINI_SHELF_Y - 0.04, -1.9]} max={[BACK_X, MINI_SHELF_Y, -0.9]} color="#1f2937" />
+      {[-1.82, -0.98].map((bz) => (
+        <Box key={bz} min={[BACK_X - 0.28, MINI_SHELF_Y - 0.2, bz - 0.015]} max={[BACK_X, MINI_SHELF_Y - 0.04, bz + 0.015]} color={COLORS.metal} />
+      ))}
+      {/* Mini PC: central node, linked to the cloud database */}
+      <Block position={[x, y, z]} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
+      <Led position={[x - 0.145, y, z - 0.07]} color="#60a5fa" hit="miniPc" />
+      <Label show={showLabels} side="classroom" position={[x - 0.1, y + 0.3, z]}>
+        Mini PC
+      </Label>
+    </group>
+  )
+}
+
+function NetworkShelf({ showLabels }) {
+  const front = -0.415 // z of the device faces (facing into the room)
+  const ex = DEVICES.esp[0]
+  return (
+    <group>
+      {/* Shelf board + brackets above the REAR door, on the inside face of the hallway wall */}
+      <Box min={[2.2, SHELF_Y - 0.04, -0.46]} max={[3.88, SHELF_Y, -0.1]} color={COLORS.wood} />
+      {[2.28, 3.8].map((x) => (
         <Box key={x} min={[x - 0.015, SHELF_Y - 0.2, -0.4]} max={[x + 0.015, SHELF_Y - 0.04, -0.1]} color={COLORS.metal} />
       ))}
 
       {/* DITO ZTE K10 home router: cellular internet for the Mini PC */}
       <DitoRouter />
-
-      {/* Mini PC: central node, linked to the cloud database */}
-      <Block position={DEVICES.miniPc} size={[0.28, 0.1, 0.28]} color="#4b5563" mat={{ metalness: 0.5, roughness: 0.4 }} />
-      <Led position={[DEVICES.miniPc[0] - 0.07, DEVICES.miniPc[1], front - 0.005]} color="#60a5fa" hit="miniPc" />
 
       {/* Mercusys AC12G (black router, 4 antennas): LAN connector for the Hikvision scanners */}
       <Block position={DEVICES.mercusys} size={[0.42, 0.05, 0.26]} color="#111111" mat={{ roughness: 0.3 }} />
@@ -1400,20 +1588,19 @@ function NetworkShelf({ showLabels }) {
 
       {/* ESP32 + attached GSM module on a small base */}
       <Block position={DEVICES.esp} size={[0.42, 0.03, 0.22]} color="#1f2937" />
-      <Block position={[2.29, SHELF_Y + 0.04, -0.3]} size={[0.2, 0.02, 0.08]} color="#1e3a8a" />
-      <Block position={[2.26, SHELF_Y + 0.055, -0.3]} size={[0.08, 0.012, 0.06]} color="#cbd5e1" mat={{ metalness: 0.8 }} />
-      <Led position={[2.36, SHELF_Y + 0.055, -0.32]} color="#3b82f6" hit="esp" size={0.012} />
-      <Block position={[2.5, SHELF_Y + 0.04, -0.3]} size={[0.12, 0.02, 0.12]} color="#b91c1c" />
-      <Led position={[2.47, SHELF_Y + 0.055, -0.34]} color="#f59e0b" hit="esp" size={0.012} />
-      <mesh position={[2.53, SHELF_Y + 0.13, -0.3]} castShadow>
+      <Block position={[ex - 0.09, SHELF_Y + 0.04, -0.3]} size={[0.2, 0.02, 0.08]} color="#1e3a8a" />
+      <Block position={[ex - 0.12, SHELF_Y + 0.055, -0.3]} size={[0.08, 0.012, 0.06]} color="#cbd5e1" mat={{ metalness: 0.8 }} />
+      <Led position={[ex - 0.02, SHELF_Y + 0.055, -0.32]} color="#3b82f6" hit="esp" size={0.012} />
+      <Block position={[ex + 0.12, SHELF_Y + 0.04, -0.3]} size={[0.12, 0.02, 0.12]} color="#b91c1c" />
+      <Led position={[ex + 0.09, SHELF_Y + 0.055, -0.34]} color="#f59e0b" hit="esp" size={0.012} />
+      <mesh position={[DEVICES.gsmAntennaTip[0], SHELF_Y + 0.13, -0.3]} castShadow>
         <cylinderGeometry args={[0.008, 0.008, 0.18, 8]} />
         <meshStandardMaterial color="#111" />
       </mesh>
 
-      <Label show={showLabels} side="classroom" position={[0.5, 3.12, -0.3]}>DITO ZTE K10</Label>
-      <Label show={showLabels} side="classroom" position={[1.1, 2.86, -0.45]}>Mini PC</Label>
-      <Label show={showLabels} side="classroom" position={[1.72, 3.04, -0.3]}>Mercusys AC12G</Label>
-      <Label show={showLabels} side="classroom" position={[2.6, 2.9, -0.4]}>ESP32 + GSM</Label>
+      <Label show={showLabels} side="classroom" position={[2.35, 3.12, -0.3]}>DITO ZTE K10</Label>
+      <Label show={showLabels} side="classroom" position={[3.0, 2.98, -0.3]}>Mercusys AC12G</Label>
+      <Label show={showLabels} side="classroom" position={[3.6, 2.86, -0.4]}>ESP32 + GSM</Label>
     </group>
   )
 }
@@ -1741,15 +1928,16 @@ function Scene({ showLabels, viewRequest, autoFollow, smsText }) {
       {/* Room B 301 interior + all hardware (room-local coordinates) */}
       <group position={[0, TOP_Y, 0]}>
         <Room301Interior showLabels={showLabels} />
-        {/* Fire extinguisher: OUTSIDE on the hallway wall, right next to the doorway */}
-        <FireExtinguisher position={[DOOR.x2 + 0.4, 0, 0.1]} />
-        {/* Entry terminal: OUTSIDE on the hallway wall, right next to the door frame */}
-        <Terminal id="entry" position={[0.6, 1.45, 0.1]} beamLength={0.8} />
-        {/* Exit terminal: INSIDE wall, right of the door frame, facing into the room */}
-        <Terminal id="exit" position={[2.6, 1.45, -0.1]} rotationY={Math.PI} />
-        <Label show={showLabels} side="hallway" position={[0.45, 1.8, 0.3]}>Entry Terminal (Hikvision)</Label>
-        <Label show={showLabels} side="classroom" position={[2.75, 1.8, -0.3]}>Exit Terminal (Hikvision)</Label>
+        {/* Fire extinguisher: OUTSIDE on the hallway wall, beside the emergency FRONT door */}
+        <FireExtinguisher position={[FRONT_DOOR.x2 + 0.4, 0, 0.1]} />
+        {/* Entry terminal: OUTSIDE, beside the REAR door (front side of its frame) */}
+        <Terminal id="entry" position={[TERMINAL_X, 1.45, 0.1]} beamLength={0.8} />
+        {/* Exit terminal: same spot on the INSIDE face of the wall, facing into the room */}
+        <Terminal id="exit" position={[TERMINAL_X, 1.45, -0.1]} rotationY={Math.PI} />
+        <Label show={showLabels} side="hallway" position={[TERMINAL_X - 0.2, 1.8, 0.3]}>Entry Terminal (Hikvision)</Label>
+        <Label show={showLabels} side="classroom" position={[TERMINAL_X - 0.2, 1.8, -0.3]}>Exit Terminal (Hikvision)</Label>
         <NetworkShelf showLabels={showLabels} />
+        <MiniPcShelf showLabels={showLabels} />
         <Wires />
         <Pulses />
         <GsmSignal smsText={smsText} />
