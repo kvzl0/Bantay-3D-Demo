@@ -11,7 +11,7 @@ Room B 301 (front wall next to the stairs, back wall next to Room 302), as seen 
 | Wall | Contents |
 | --- | --- |
 | Front | Mini-whiteboard, green chalkboard with a TV, whiteboard, posters; one teacher's table centred in front of the boards |
-| Back | Vision board; power outlet strip in the middle with a wall fan above; 4 × 8 orange helmet rack beside the rear door, with the Mini PC shelf above it |
+| Back | Vision board; two wall outlets in the middle below the wall fan (the fan plugs into one); 4 × 8 orange helmet rack beside the rear door, with the Mini PC shelf above it. The extension strip sits on that shelf beside the Mini PC and powers every device. |
 | Right side | Two windows with white wavy grilles and yellow curtains; a wall fan on the pier between them |
 | Left side (hallway) | Emergency front door, 3 curtained windows, Exit terminal beside the rear door, rear door, device shelf above it (DITO ZTE K10, Mercusys AC12G, ESP32 + GSM) |
 
