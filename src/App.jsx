@@ -29,6 +29,8 @@ import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState }
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Billboard, Html, Line, OrbitControls, Sky } from '@react-three/drei'
+import MobileLayout from './MobileLayout'
+import WelcomeSplash from './WelcomeSplash'
 
 /* ------------------------------------------------------------------ */
 /* Constants & helpers                                                 */
@@ -419,7 +421,8 @@ const VIEWS = {
   hallway: { label: 'Hallway', pos: [-3.0, TOP_Y + 3.0, 8.8], target: [0.8, TOP_Y + 1.5, 0.3] },
   // From the front corner by the window wall toward the rear door and the back wall
   classroom: { label: 'Classroom', pos: [-4.6, TOP_Y + 2.7, -5.2], target: [3.0, TOP_Y + 1.6, -1.2] },
-  overview: { label: 'Overview', pos: [30, 22, 34], target: [5, 4.5, -1] },
+  // Front overview: high enough to show the blue roof, far enough to frame the whole building
+  overview: { label: 'Overview', pos: [8, 20, 42], target: [3, 4, 0] },
 }
 // Follow camera sits in front (courtyard side): the stairwell's outer side is now a solid wall,
 // so the student is watched through the landings' open fronts and grilles.
@@ -1352,11 +1355,20 @@ function FloorLevel({ level, rooms, label, showLabels }) {
   )
 }
 
-/** Roof slab; hidden whenever the camera is above it so the top floor stays visible. */
+/** Roof slab; hidden only when the camera is above it AND zoomed in close (distance < 22).
+ *  From the overview angle the camera is high but far away, so the roof stays visible.
+ *  Only a direct overhead zoom-in hides the roof to reveal the top floor. */
 function Roof() {
   const ref = useRef()
+  // Approximate centre of the building footprint (world coords)
+  const BUILD_CX = (BUILDING.x1 + BUILDING.x2) / 2  // ≈ 9
+  const BUILD_CZ = (COLUMN.z2 + (-ROOM.depth)) / 2   // ≈ -3
   useFrame(({ camera }) => {
-    ref.current.visible = camera.position.y < ROOF_TOP + 0.3
+    const aboveRoof = camera.position.y > ROOF_TOP + 0.3
+    const dx = camera.position.x - BUILD_CX
+    const dz = camera.position.z - BUILD_CZ
+    const horizDist = Math.sqrt(dx * dx + dz * dz)
+    ref.current.visible = !(aboveRoof && horizDist < 22)
   })
   // Low-pitch blue GI-sheet gable roof (blue fascia, as in the building photo)
   const rx1 = STAIR.x1 - 0.6
@@ -2247,7 +2259,7 @@ function GsmSignal({ smsText }) {
           className="pointer-events-none w-56 rounded-xl bg-amber-400 px-3 py-2 text-[11px] leading-snug text-amber-950 shadow-xl transition duration-300"
           style={{ opacity: 0 }}
         >
-          <p className="text-[9px] font-bold uppercase tracking-wider">SMS · GSM module → Parent (DITO)</p>
+          <p className="text-[9px] font-bold uppercase tracking-wider">SMS · GSM module → Parent</p>
           <p className="mt-0.5 font-semibold">{smsText}</p>
         </div>
       </Html>
@@ -2394,7 +2406,7 @@ function CameraRig({ viewRequest, autoFollow }) {
   const sim = useContext(SimContext)
   const camera = useThree((s) => s.camera)
   const controls = useRef()
-  const goal = useRef({ key: 'hallway', moving: false })
+  const goal = useRef({ key: 'overview', moving: false })
   const goalPos = useMemo(() => new THREE.Vector3(), [])
   const goalTarget = useMemo(() => new THREE.Vector3(), [])
 
@@ -2446,7 +2458,7 @@ function CameraRig({ viewRequest, autoFollow }) {
     <OrbitControls
       ref={controls}
       makeDefault
-      target={VIEWS.hallway.target}
+      target={VIEWS.overview.target}
       maxPolarAngle={Math.PI / 2.05}
       minDistance={1.5}
       maxDistance={70}
@@ -2526,94 +2538,134 @@ const TONE_STYLES = {
   ok: 'bg-emerald-500 text-emerald-950',
 }
 
-function Dashboard({ mode, reached, smsText }) {
+function Dashboard({ mode, reached, smsText, isMinimized, onToggleMinimize }) {
   const tl = mode ? TIMELINES[mode] : null
   const status = tl ? [...tl.status].reverse().find((s) => s.at <= reached) : null
   const tone = status?.tone ?? 'standby'
   const smsRevealed = tl?.logs.some((l) => l.sms && l.at <= reached)
 
   return (
-    <div className="pointer-events-auto absolute left-3 top-3 z-20 max-h-[calc(100vh-7rem)] w-[23rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/85 p-4 text-white shadow-2xl backdrop-blur-md">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Bantay · Smart Student Monitoring</p>
-      <h1 className="mt-1 text-sm font-bold leading-snug">Claro M. Recto High School - Grade 10 Diamond (Room B 301)</h1>
-
-      <div className="mt-3 flex items-center gap-3 rounded-xl bg-white/5 p-2.5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">
-          {MOCK_STUDENT.name
-            .split(' ')
-            .map((p) => p[0])
-            .slice(0, 2)
-            .join('')}
+    /*
+     * Outer wrapper slides the whole panel left when minimized.
+     * translateX(-100%) hides the panel body; a thin pull-tab sticks out
+     * on the right edge of the wrapper so the user can click to reopen.
+     * Both expanded and collapsed states use rounded-2xl on the panel.
+     */
+    <div
+      className="pointer-events-auto absolute left-3 top-3 z-20 flex items-start text-white"
+      style={{
+        transform: isMinimized ? 'translateX(calc(-100% - 0.75rem + 2.25rem))' : 'translateX(0)',
+        transition: 'transform 0.35s cubic-bezier(0.4,0,0.2,1)',
+      }}
+    >
+      {/* ── Panel body ── */}
+      <div className="w-[23rem] max-w-[calc(100vw-3.5rem)] rounded-2xl border border-white/10 bg-slate-900/85 shadow-2xl backdrop-blur-md overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 p-3 sm:p-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Bantay · Smart Student Monitoring</p>
+            <h1 className="mt-0.5 text-xs font-bold leading-snug sm:text-sm">
+              Claro M. Recto High School - Grade 10 Diamond
+            </h1>
+          </div>
         </div>
-        <div className="text-xs">
-          <p>
-            <span className="text-slate-400">Student:</span> <span className="font-semibold">{MOCK_STUDENT.name}</span>
-          </p>
-          <p className="text-slate-400">LRN {MOCK_STUDENT.lrn} · mock data</p>
+
+        {/* Scrollable content */}
+        <div className="max-h-[calc(100vh-10rem)] overflow-y-auto border-t border-white/10 p-3 sm:p-4">
+          <div className="flex items-center gap-3 rounded-xl bg-white/5 p-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">
+              {MOCK_STUDENT.name.split(' ').map((p) => p[0]).slice(0, 2).join('')}
+            </div>
+            <div className="min-w-0 flex-1 text-xs">
+              <p>
+                <span className="text-slate-400">Student:</span>{' '}
+                <span className="font-semibold">{MOCK_STUDENT.name}</span>
+              </p>
+              <p className="truncate text-slate-400">LRN {MOCK_STUDENT.lrn} · mock data</p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-col items-start gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-slate-400">Status</span>
+            <span className={`rounded-full px-2.5 py-1 text-right font-semibold ${TONE_STYLES[tone]}`}>
+              {status?.text ?? 'Standby – choose a simulation'}
+            </span>
+          </div>
+
+          {tl && (
+            <ul className="mt-3 space-y-1.5 text-xs">
+              {tl.logs.map((log) => {
+                const done = log.at <= reached
+                return (
+                  <li
+                    key={log.text}
+                    className={`flex gap-2 rounded-lg px-2 py-1.5 transition-colors duration-300 ${
+                      done ? 'bg-emerald-500/15 text-white' : 'bg-white/5 text-slate-500'
+                    }`}
+                  >
+                    <span className={`w-4 shrink-0 text-center ${done ? 'text-emerald-300' : ''}`}>{done ? log.icon : '•'}</span>
+                    <span>{log.text}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {smsRevealed && (
+            <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-400/10 p-2.5 text-xs">
+              <p className="text-[10px] uppercase tracking-wider text-amber-300">SMS preview · to Parent/Guardian</p>
+              <p className="mt-1 text-amber-50">{smsText}</p>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-slate-400">
+            {[
+              ['bg-sky-400', 'LAN data'],
+              ['bg-violet-400', 'Cloud link (cellular)'],
+              ['bg-amber-400', 'SMS trigger'],
+            ].map(([dot, text]) => (
+              <span key={text} className="flex items-center gap-1.5">
+                <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
+                {text}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-        <span className="text-slate-400">Status</span>
-        <span className={`rounded-full px-2.5 py-1 text-right font-semibold ${TONE_STYLES[tone]}`}>
-          {status?.text ?? 'Standby – choose a simulation'}
-        </span>
-      </div>
-
-      {tl && (
-        <ul className="mt-3 space-y-1.5 text-xs">
-          {tl.logs.map((log) => {
-            const done = log.at <= reached
-            return (
-              <li
-                key={log.text}
-                className={`flex gap-2 rounded-lg px-2 py-1.5 transition-colors duration-300 ${
-                  done ? 'bg-emerald-500/15 text-white' : 'bg-white/5 text-slate-500'
-                }`}
-              >
-                <span className={`w-4 shrink-0 text-center ${done ? 'text-emerald-300' : ''}`}>{done ? log.icon : '•'}</span>
-                <span>{log.text}</span>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {smsRevealed && (
-        <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-400/10 p-2.5 text-xs">
-          <p className="text-[10px] uppercase tracking-wider text-amber-300">SMS preview · to Parent/Guardian</p>
-          <p className="mt-1 text-amber-50">{smsText}</p>
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-slate-400">
-        {[
-          ['bg-sky-400', 'LAN data'],
-          ['bg-violet-400', 'Cloud link (internet via DITO)'],
-          ['bg-amber-400', 'SMS trigger'],
-        ].map(([dot, text]) => (
-          <span key={text} className="flex items-center gap-1.5">
-            <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
-            {text}
-          </span>
-        ))}
-      </div>
+      {/* ── Pull tab — always visible on the right edge of the wrapper ── */}
+      <button
+        type="button"
+        onClick={onToggleMinimize}
+        className="ml-1.5 flex h-10 w-7 shrink-0 items-center justify-center self-start rounded-xl bg-slate-900/85 text-white shadow-lg backdrop-blur-md transition hover:bg-slate-700/90 mt-3"
+        aria-label={isMinimized ? 'Expand panel' : 'Minimize panel'}
+      >
+        <svg
+          className={`h-4 w-4 transition-transform duration-300 ${isMinimized ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          {/* Chevron pointing left = collapse; right = expand */}
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
     </div>
   )
 }
 
 function Controls({ running, location, onEntry, onExit, showLabels, onToggleLabels, onView, autoFollow, onToggleAuto }) {
-  const base = 'rounded-xl px-5 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40'
-  const small = 'rounded-lg px-3 py-1.5 text-xs font-medium shadow transition'
+  const base = 'rounded-xl px-4 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40 sm:px-5'
+  const small = 'rounded-lg px-2.5 py-1.5 text-xs font-medium shadow transition sm:px-3'
   return (
     <>
-      <div className="pointer-events-auto absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
-        <div className="flex gap-3">
+      <div className="pointer-events-auto absolute bottom-3 left-1/2 z-20 flex w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 flex-col items-center gap-2 sm:bottom-5">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center sm:gap-3">
           <button
             type="button"
             onClick={onEntry}
             disabled={running || location !== 'courtyard'}
-            className={`${base} bg-emerald-500 text-emerald-950 hover:bg-emerald-400`}
+            className={`${base} flex-1 bg-emerald-500 text-emerald-950 hover:bg-emerald-400 sm:flex-none`}
           >
             Simulate Entry
           </button>
@@ -2621,12 +2673,12 @@ function Controls({ running, location, onEntry, onExit, showLabels, onToggleLabe
             type="button"
             onClick={onExit}
             disabled={running || location !== 'classroom'}
-            className={`${base} bg-rose-500 text-white hover:bg-rose-400`}
+            className={`${base} flex-1 bg-rose-500 text-white hover:bg-rose-400 sm:flex-none`}
           >
             Simulate Exit
           </button>
         </div>
-        <p className="rounded-full bg-slate-900/70 px-3 py-1 text-[11px] text-slate-200">
+        <p className="rounded-full bg-slate-900/70 px-3 py-1 text-center text-[11px] text-slate-200">
           {running
             ? 'Simulation running…'
             : location === 'courtyard'
@@ -2635,27 +2687,29 @@ function Controls({ running, location, onEntry, onExit, showLabels, onToggleLabe
         </p>
       </div>
       <div className="pointer-events-auto absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
-        <div className="flex gap-1.5 rounded-xl bg-slate-900/70 p-1.5">
+        <div className="flex flex-wrap justify-end gap-1.5 rounded-xl bg-slate-900/70 p-1.5">
           {Object.entries(VIEWS).map(([key, v]) => (
             <button key={key} type="button" onClick={() => onView(key)} className={`${small} bg-white/10 text-white hover:bg-white/20`}>
               {v.label}
             </button>
           ))}
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap justify-end gap-1.5">
           <button
             type="button"
             onClick={onToggleAuto}
             aria-pressed={autoFollow}
             className={`${small} ${autoFollow ? 'bg-sky-500 text-sky-950 hover:bg-sky-400' : 'bg-slate-900/80 text-white hover:bg-slate-800'}`}
           >
-            Auto camera: {autoFollow ? 'On' : 'Off'}
+            <span className="hidden sm:inline">Auto camera: {autoFollow ? 'On' : 'Off'}</span>
+            <span className="sm:hidden">Auto: {autoFollow ? 'On' : 'Off'}</span>
           </button>
           <button type="button" onClick={onToggleLabels} className={`${small} bg-slate-900/80 text-white hover:bg-slate-800`}>
-            {showLabels ? 'Hide labels' : 'Show labels'}
+            <span className="hidden sm:inline">{showLabels ? 'Hide labels' : 'Show labels'}</span>
+            <span className="sm:hidden">{showLabels ? 'Hide' : 'Show'}</span>
           </button>
         </div>
-        <p className="hidden rounded-lg bg-slate-900/60 px-2 py-1 text-right text-[10px] text-slate-200 sm:block">
+        <p className="hidden rounded-lg bg-slate-900/60 px-2 py-1 text-right text-[10px] text-slate-200 lg:block">
           Drag to orbit · Scroll to zoom · Right-drag to pan
           <br />
           The roof hides automatically when viewed from above
@@ -2663,6 +2717,23 @@ function Controls({ running, location, onEntry, onExit, showLabels, onToggleLabe
       </div>
     </>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* useIsMobile hook                                                    */
+/* ------------------------------------------------------------------ */
+
+/** Returns true when the viewport is narrower than Tailwind's `sm` (640 px). */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640)
+  useLayoutEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const handler = (e) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    setIsMobile(mq.matches)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isMobile
 }
 
 /* ------------------------------------------------------------------ */
@@ -2678,7 +2749,10 @@ export default function App() {
   const [smsText, setSmsText] = useState('')
   const [showLabels, setShowLabels] = useState(true)
   const [autoFollow, setAutoFollow] = useState(true)
-  const [viewRequest, setViewRequest] = useState({ key: 'hallway', n: 0 })
+  const [viewRequest, setViewRequest] = useState({ key: 'overview', n: 0 })
+  const [isMinimized, setIsMinimized] = useState(false)
+  const [showSplash, setShowSplash] = useState(true)
+  const isMobile = useIsMobile()
 
   const start = (next) => {
     if (running) return
@@ -2690,10 +2764,28 @@ export default function App() {
     setSmsText(smsMessage(next, manilaStamp()))
   }
 
+  const sharedProps = {
+    mode,
+    reached,
+    smsText,
+    running,
+    location,
+    timelines: TIMELINES,
+    mockStudent: MOCK_STUDENT,
+    views: VIEWS,
+    showLabels,
+    autoFollow,
+    onEntry: () => start('entry'),
+    onExit: () => start('exit'),
+    onToggleLabels: () => setShowLabels((v) => !v),
+    onView: (key) => setViewRequest((r) => ({ key, n: r.n + 1 })),
+    onToggleAuto: () => setAutoFollow((v) => !v),
+  }
+
   return (
     <SimContext.Provider value={sim}>
       <div className="relative h-screen w-full overflow-hidden bg-slate-200 font-sans">
-        <Canvas shadows dpr={[1, 2]} camera={{ position: VIEWS.hallway.pos, fov: 45, near: 0.1, far: 300 }}>
+        <Canvas shadows dpr={[1, 2]} camera={{ position: VIEWS.overview.pos, fov: 45, near: 0.1, far: 300 }}>
           <Scene showLabels={showLabels} viewRequest={viewRequest} autoFollow={autoFollow} smsText={smsText} />
           <Director
             onReach={setReached}
@@ -2704,8 +2796,20 @@ export default function App() {
             }}
           />
         </Canvas>
+
+        {/* Mobile overlay – shown only on small screens */}
+        {isMobile && <MobileLayout {...sharedProps} />}
+
+        {/* Desktop overlay – hidden on small screens */}
+        {!isMobile && (
         <div className="pointer-events-none absolute inset-0">
-          <Dashboard mode={mode} reached={reached} smsText={smsText} />
+          <Dashboard
+            mode={mode}
+            reached={reached}
+            smsText={smsText}
+            isMinimized={isMinimized}
+            onToggleMinimize={() => setIsMinimized(!isMinimized)}
+          />
           <Controls
             running={running}
             location={location}
@@ -2718,6 +2822,11 @@ export default function App() {
             onToggleAuto={() => setAutoFollow((v) => !v)}
           />
         </div>
+        )}
+
+        {/* Welcome splash – shown once on load, z-50 sits above everything */}
+        {showSplash && <WelcomeSplash onEnter={() => setShowSplash(false)} />}
+
       </div>
     </SimContext.Provider>
   )

@@ -73,10 +73,16 @@ The whole demo lives in [`src/App.jsx`](src/App.jsx) and default-exports `App`. 
 
 ## How to use the demo
 
+On first load a **welcome splash** appears. Click **Explore the Demo** to dismiss it and enter the 3D scene.
+
 - **Simulate Entry** (student starts in the ground-floor courtyard): the student climbs the left-side stairs, walks along the top-floor hallway, and scans at the outdoor entry terminal (blue turns green). The door swings inward and the student steps inside. Pulses then run scanner → Mercusys → Mini PC → cloud, and Mini PC → ESP32 + GSM, which shows the official SMS bubble.
 - **Simulate Exit** (student in the room): the student scans at the indoor exit terminal, the door swings outward, and the student walks out to the hallway and back down the stairs. The exit SMS goes out through the same network path.
 - The buttons are enabled based on where the student currently is.
-- Camera presets (Hallway / Classroom / Overview), an **Auto camera** toggle that follows the student, and a label toggle are at the top right. Drag to orbit, scroll to zoom. The roof hides automatically when the camera is above it.
+- Camera presets (Hallway / Classroom / Overview), an **Auto camera** toggle that follows the student, and a label toggle are at the top right. Drag to orbit, scroll to zoom. The roof hides automatically when the camera is above it and the view is zoomed in close — from the Overview angle the roof stays visible.
+
+**On mobile** (viewport narrower than 640 px) the UI switches to a bottom-sheet layout with three tabs (Info, Log, Camera). Tap **Hide panel** to get a full-screen 3D view; a **Show panel** handle stays pinned to the bottom so you can bring it back.
+
+**On desktop**, the info panel on the left can be collapsed with its pull-tab so the full scene is visible.
 
 The student name and LRN are mock data (`MOCK_STUDENT` at the top of `src/App.jsx`). Timings for every step are in the `RAW_TIMELINES` object in the same file.
 
@@ -86,11 +92,13 @@ The student name and LRN are mock data (`MOCK_STUDENT` at the top of `src/App.js
 index.html
 vite.config.js
 src/
-  main.jsx      # mounts <App />
-  index.css     # Tailwind import
-  App.jsx       # the entire 3D scene, simulation timelines, and UI overlay
+  main.jsx           # mounts <App />
+  index.css          # Tailwind import + Space Grotesk / Plus Jakarta Sans fonts
+  App.jsx            # 3D scene, simulation timelines, desktop UI overlay
+  WelcomeSplash.jsx  # branded welcome modal shown on first load
+  MobileLayout.jsx   # mobile bottom-sheet UI (viewport < 640 px)
 scripts/
-  commit.sh     # commit helper that records Kiev Gonzales as author and committer
+  commit.sh          # commit helper that records Kiev Gonzales as author and committer
 ```
 
 ## Contributing / commits
