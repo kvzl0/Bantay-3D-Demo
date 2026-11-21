@@ -114,7 +114,7 @@ export default function MobileLayout({
 
       {/* ── Bottom sheet — slides in/out from bottom ─────────── */}
       <div
-        className="pointer-events-auto flex max-h-[55vh] flex-col transition-transform duration-300"
+        className="pointer-events-auto flex max-h-[50vh] flex-col transition-transform duration-300"
         style={{ transform: sheetOpen ? 'translateY(0)' : 'translateY(100%)' }}
       >
         {/* Handle at top of sheet — visible when sheet is open */}
