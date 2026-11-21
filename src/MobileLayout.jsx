@@ -238,7 +238,7 @@ export default function MobileLayout({
         </div>
 
         {/* Action buttons — always at the bottom of the sheet */}
-        <div className="grid grid-cols-2 gap-2 border-t border-white/10 bg-slate-900/95 px-3 py-3 backdrop-blur-md">
+        <div className="grid grid-cols-2 gap-2 border-t border-white/10 bg-slate-900/95 px-3 pt-3 backdrop-blur-md" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <button type="button" onClick={onEntry} disabled={running || location !== 'courtyard'}
             className="rounded-2xl bg-emerald-500 py-3 text-sm font-bold text-emerald-950 shadow-lg transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
             Simulate Entry
