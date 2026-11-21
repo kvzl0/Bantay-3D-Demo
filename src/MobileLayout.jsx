@@ -11,7 +11,7 @@
  * When hidden: full 3D view, top bar stays so user always sees context.
  * When shown: bottom sheet covers ~55vh.
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 
 const TONE_STYLES = {
   standby: 'bg-slate-700 text-slate-200',
@@ -61,22 +61,9 @@ export default function MobileLayout({
   timelines, mockStudent, views,
   showLabels, autoFollow,
   onEntry, onExit, onToggleLabels, onView, onToggleAuto,
-  onSheetResize,
 }) {
   const [activeTab, setActiveTab] = useState('info')
   const [sheetOpen, setSheetOpen] = useState(true)
-  const sheetRef = useRef(null)
-
-  useEffect(() => {
-    if (!sheetRef.current || !onSheetResize) return
-    const ro = new ResizeObserver(() => {
-      onSheetResize(sheetOpen ? (sheetRef.current?.offsetHeight ?? 0) : 0)
-    })
-    ro.observe(sheetRef.current)
-    // Report immediately on open/close toggle
-    onSheetResize(sheetOpen ? (sheetRef.current?.offsetHeight ?? 0) : 0)
-    return () => ro.disconnect()
-  }, [sheetOpen, onSheetResize])
 
   const tl = mode ? timelines[mode] : null
   const status = tl ? [...tl.status].reverse().find((s) => s.at <= reached) : null
@@ -127,8 +114,7 @@ export default function MobileLayout({
 
       {/* ── Bottom sheet — slides in/out from bottom ─────────── */}
       <div
-        ref={sheetRef}
-        className="pointer-events-auto flex flex-col transition-transform duration-300"
+        className="pointer-events-auto flex max-h-[55vh] flex-col transition-transform duration-300"
         style={{ transform: sheetOpen ? 'translateY(0)' : 'translateY(100%)' }}
       >
         {/* Handle at top of sheet — visible when sheet is open */}
@@ -166,7 +152,7 @@ export default function MobileLayout({
         </div>
 
         {/* Tab content */}
-        <div className="max-h-[36vh] overflow-y-auto bg-slate-900/95 p-3 backdrop-blur-md">
+        <div className="flex-1 overflow-y-auto bg-slate-900/95 p-3 backdrop-blur-md">
 
           {/* Info tab */}
           {activeTab === 'info' && (
