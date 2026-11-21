@@ -2752,7 +2752,6 @@ export default function App() {
   const [viewRequest, setViewRequest] = useState({ key: 'overview', n: 0 })
   const [isMinimized, setIsMinimized] = useState(false)
   const [showSplash, setShowSplash] = useState(true)
-  const [sheetHeight, setSheetHeight] = useState(0)
   const isMobile = useIsMobile()
 
   const start = (next) => {
@@ -2785,10 +2784,7 @@ export default function App() {
 
   return (
     <SimContext.Provider value={sim}>
-      <div
-        className="relative h-screen w-full overflow-hidden bg-slate-200 font-sans"
-        style={isMobile ? { paddingBottom: sheetHeight } : undefined}
-      >
+      <div className="relative h-screen w-full overflow-hidden bg-slate-200 font-sans">
         <Canvas shadows dpr={[1, 2]} camera={{ position: VIEWS.overview.pos, fov: 45, near: 0.1, far: 300 }}>
           <Scene showLabels={showLabels} viewRequest={viewRequest} autoFollow={autoFollow} smsText={smsText} />
           <Director
@@ -2802,7 +2798,7 @@ export default function App() {
         </Canvas>
 
         {/* Mobile overlay – shown only on small screens */}
-        {isMobile && <MobileLayout {...sharedProps} onSheetResize={setSheetHeight} />}
+        {isMobile && <MobileLayout {...sharedProps} />}
 
         {/* Desktop overlay – hidden on small screens */}
         {!isMobile && (
